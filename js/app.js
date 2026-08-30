@@ -43,6 +43,15 @@ async function wipeAndReseed(data) {
   }
   await importWords(data);
   await put("meta", { key: "dataset", version: data.version });
+
+  // sources_enabled is a filter over `quelle` values, which are dataset-specific.
+  // A stale list from a previous dataset would silently filter out every new
+  // word (no triage candidates ever offered) - always resync it to what's
+  // actually in the pool we just imported.
+  const quellenInData = [...new Set((data.woerter || []).map((w) => w.quelle).filter(Boolean))];
+  if (quellenInData.length) {
+    await saveSettings({ sources_enabled: quellenInData });
+  }
 }
 
 async function bootstrap() {
