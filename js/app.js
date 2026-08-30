@@ -557,8 +557,8 @@ async function handleImportFile(file) {
 
 function wireGlobalHandlers() {
   root.addEventListener("click", async (e) => {
-    const btn = e.target.closest("[data-action]");
-    if (!btn || btn.tagName !== "BUTTON") return;
+    const btn = e.target.closest("button");
+    if (!btn) return;
     const action = btn.dataset.action;
 
     if (action === "triage") {
