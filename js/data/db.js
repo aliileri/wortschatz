@@ -2,7 +2,7 @@
 // only — there is no server and nothing is ever sent over the network.
 
 const DB_NAME = "wortschatz";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise = null;
 
@@ -10,37 +10,51 @@ export function openDB() {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
+    req.onupgradeneeded = (event) => {
       const db = req.result;
+      const tx = req.transaction;
+      const oldVersion = event.oldVersion;
 
-      const words = db.createObjectStore("words", { keyPath: "id" });
-      words.createIndex("quelle", "quelle");
-      words.createIndex("thema", "thema");
-      words.createIndex("niveau", "niveau");
-      words.createIndex("wortart", "wortart");
-      words.createIndex("source_id", "source_id");
+      if (oldVersion < 1) {
+        const words = db.createObjectStore("words", { keyPath: "id" });
+        words.createIndex("quelle", "quelle");
+        words.createIndex("thema", "thema");
+        words.createIndex("niveau", "niveau");
+        words.createIndex("wortart", "wortart");
+        words.createIndex("source_id", "source_id");
 
-      const userWords = db.createObjectStore("userWords", { keyPath: "wordId" });
-      userWords.createIndex("status", "status");
+        const userWords = db.createObjectStore("userWords", { keyPath: "wordId" });
+        userWords.createIndex("status", "status");
 
-      // is_active is a boolean and NOT a valid IndexedDB index key type, so it
-      // is filtered in JS after a getAll() rather than indexed - fine at this
-      // data scale (a few thousand cards for one user).
-      const reviewCards = db.createObjectStore("reviewCards", { keyPath: "cardId" });
-      reviewCards.createIndex("due_on", "due_on");
-      reviewCards.createIndex("wordId", "wordId");
-      reviewCards.createIndex("direction", "direction");
+        // is_active is a boolean and NOT a valid IndexedDB index key type, so it
+        // is filtered in JS after a getAll() rather than indexed - fine at this
+        // data scale (a few thousand cards for one user).
+        const reviewCards = db.createObjectStore("reviewCards", { keyPath: "cardId" });
+        reviewCards.createIndex("due_on", "due_on");
+        reviewCards.createIndex("wordId", "wordId");
+        reviewCards.createIndex("direction", "direction");
 
-      const reviewLogs = db.createObjectStore("reviewLogs", { keyPath: "id", autoIncrement: true });
-      reviewLogs.createIndex("dateKey", "dateKey");
-      reviewLogs.createIndex("question_type", "question_type");
-      reviewLogs.createIndex("result", "result");
-      reviewLogs.createIndex("wordId", "wordId");
-      reviewLogs.createIndex("cardId", "cardId");
+        const reviewLogs = db.createObjectStore("reviewLogs", { keyPath: "id", autoIncrement: true });
+        reviewLogs.createIndex("dateKey", "dateKey");
+        reviewLogs.createIndex("question_type", "question_type");
+        reviewLogs.createIndex("result", "result");
+        reviewLogs.createIndex("wordId", "wordId");
+        reviewLogs.createIndex("cardId", "cardId");
 
-      db.createObjectStore("dailyPlans", { keyPath: "date" });
-      db.createObjectStore("settings", { keyPath: "key" });
-      db.createObjectStore("meta", { keyPath: "key" });
+        db.createObjectStore("dailyPlans", { keyPath: "date" });
+        db.createObjectStore("settings", { keyPath: "key" });
+        db.createObjectStore("meta", { keyPath: "key" });
+      }
+
+      if (oldVersion < 2) {
+        // "set" tracking (see js/data/sets.js): quotas are scoped to a study
+        // session ("set") rather than a calendar day, so logs need a setId
+        // index alongside the existing dateKey one.
+        const reviewLogs = tx.objectStore("reviewLogs");
+        if (!reviewLogs.indexNames.contains("setId")) {
+          reviewLogs.createIndex("setId", "setId");
+        }
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);

@@ -5,7 +5,7 @@ import * as planner from "./data/planner.js";
 import * as stats from "./data/stats.js";
 import { compare as answerCompare } from "./logic/answerEval.js";
 import { today as todayStr } from "./data/clock.js";
-import { getItemContext, dashboardContext } from "./studyFlow.js";
+import { getItemContext, dashboardContext, beginNewSet } from "./studyFlow.js";
 import { exportBackup, importBackup } from "./data/backup.js";
 
 const root = document.getElementById("app");
@@ -13,7 +13,6 @@ const navEl = document.getElementById("app-nav");
 
 let currentItem = null; // the study item currently on screen (for answer handlers)
 let pendingAlmost = null; // {card, question} while the "almost correct" confirm is shown
-let overrideCapsForSession = false; // set once the user taps "Yine de devam et"; stays on until reload
 const QUELLE_LABELS = { kursbuch: "Kursbuch" };
 const NIVEAU_VALUES = ["A1", "A2", "B1", "B2"];
 const WORTART_VALUES = [
@@ -110,14 +109,13 @@ async function renderDashboard() {
 
   const action = ctx.hasAnythingToDo
     ? `<button class="btn btn--primary" data-action="start-study" type="button">Çalışmaya başla</button>`
-    : `<p class="muted">Bugün için her şey tamamlandı. 🎉</p>`;
-  if (ctx.onlyViaOverride) overrideCapsForSession = true;
+    : `<p class="muted">Öğrenilecek yeni bir şey kalmadı. 🎉</p>`;
 
   root.innerHTML = `
     ${banners.join("")}
     <div class="stat-row">
       <div class="stat-tile"><span class="stat-tile__value">${ctx.pendingReviews}</span><span class="stat-tile__label">Bekleyen tekrar</span></div>
-      <div class="stat-tile"><span class="stat-tile__value">${ctx.doneToday}</span><span class="stat-tile__label">Bugün yapılan</span></div>
+      <div class="stat-tile"><span class="stat-tile__value">${ctx.doneToday}</span><span class="stat-tile__label">Bu sette yapılan</span></div>
       <div class="stat-tile"><span class="stat-tile__value">${ctx.remainingNewWords}</span><span class="stat-tile__label">Kalan yeni kelime</span></div>
     </div>
     ${ctx.streak > 0 ? `<p class="muted">🔥 ${ctx.streak} günlük seri</p>` : ""}
@@ -127,10 +125,9 @@ async function renderDashboard() {
 
 // ---------- study ----------
 
-async function renderStudy(opts = {}) {
+async function renderStudy() {
   pendingAlmost = null;
-  const ignoreCaps = opts.ignoreCaps ?? overrideCapsForSession;
-  const item = await getItemContext(todayStr(), { ignoreCaps });
+  const item = await getItemContext(todayStr());
   currentItem = item;
   root.innerHTML = studyChromeHtml(item) + itemBodyHtml(item);
 }
@@ -159,10 +156,13 @@ function studyChromeHtml(item) {
 
 function itemBodyHtml(item) {
   if (item.kind === "done") {
+    const message = item.canStartNewSet
+      ? "Bu set tamamlandı! 🎉"
+      : "Öğrenilecek yeni bir şey kalmadı. 🎉";
     return `<div class="card study-card">
-      <p>Bugün için her şey tamamlandı. 🎉</p>
+      <p>${message}</p>
       <div class="btn-row">
-        ${item.canForceMore ? `<button class="btn btn--primary" data-action="continue-anyway">Yine de devam et</button>` : ""}
+        ${item.canStartNewSet ? `<button class="btn btn--primary" data-action="start-new-set">Yeni set başlat</button>` : ""}
         <a class="btn btn--secondary" href="#/dashboard">Panele dön</a>
       </div>
     </div>`;
@@ -292,7 +292,7 @@ async function handleReviewAnswerSubmit(form) {
     root.innerHTML = almostConfirmHtml(question);
     return;
   }
-  await planner.submitReviewAnswer(card, overall === "correct", question.type, todayStr());
+  await planner.submitReviewAnswer(card, overall === "correct", question.type, todayStr(), currentItem.setId);
   return renderStudy();
 }
 
@@ -429,7 +429,7 @@ async function renderSettings() {
     <h1 class="section-title">Ayarlar</h1>
     <form id="settings-form" class="card">
       <div class="btn-row">
-        <div class="field"><label>Günlük yeni kelime</label><input type="text" inputmode="numeric" name="daily_new_words" value="${s.daily_new_words}"></div>
+        <div class="field"><label>Set başına yeni kelime</label><input type="text" inputmode="numeric" name="daily_new_words" value="${s.daily_new_words}"></div>
         <div class="field"><label>Triyaj tavanı</label><input type="text" inputmode="numeric" name="triage_cap" value="${s.triage_cap}"></div>
         <div class="field"><label>Tekrar tavanı</label><input type="text" inputmode="numeric" name="review_cap" value="${s.review_cap}"></div>
         <div class="field"><label>Yığın eşiği</label><input type="text" inputmode="numeric" name="backlog_threshold" value="${s.backlog_threshold}"></div>
@@ -564,7 +564,7 @@ function wireGlobalHandlers() {
     if (action === "triage") {
       e.preventDefault();
       const uw = await get("userWords", btn.dataset.wordId);
-      await planner.applyTriage(uw, btn.dataset.choice, todayStr());
+      await planner.applyTriage(uw, btn.dataset.choice, todayStr(), currentItem.setId);
       return renderStudy();
     }
     if (action === "recheck") {
@@ -576,20 +576,20 @@ function wireGlobalHandlers() {
     if (action === "review-meaning") {
       e.preventDefault();
       const correct = btn.dataset.choice === "knew";
-      await planner.submitReviewAnswer(currentItem.card, correct, "meaning", todayStr());
+      await planner.submitReviewAnswer(currentItem.card, correct, "meaning", todayStr(), currentItem.setId);
       return renderStudy();
     }
     if (action === "confirm-almost") {
       e.preventDefault();
       const { card, question } = pendingAlmost;
-      await planner.submitReviewAnswer(card, btn.dataset.choice === "correct", question.type, todayStr());
+      await planner.submitReviewAnswer(card, btn.dataset.choice === "correct", question.type, todayStr(), currentItem.setId);
       pendingAlmost = null;
       return renderStudy();
     }
-    if (action === "continue-anyway") {
+    if (action === "start-new-set") {
       e.preventDefault();
-      overrideCapsForSession = true;
-      return renderStudy({ ignoreCaps: true });
+      await beginNewSet();
+      return renderStudy();
     }
     if (action === "start-study") {
       e.preventDefault();

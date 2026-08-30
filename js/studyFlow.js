@@ -3,6 +3,7 @@
 import * as planner from "./data/planner.js";
 import * as stats from "./data/stats.js";
 import { get } from "./data/db.js";
+import { getCurrentSetId, startNewSet } from "./data/sets.js";
 import { buildQuestion } from "./logic/questionTypes.js";
 
 async function wordFor(wordId) {
@@ -20,15 +21,30 @@ function nextItem(queue) {
   return { kind: "done", backlogBlocked: queue.backlogBlocked };
 }
 
-export async function getItemContext(todayStr, { ignoreCaps = false } = {}) {
-  const queue = await planner.buildDailyQueue(todayStr, { ignoreCaps });
+function queueHasAnything(queue) {
+  return Boolean(
+    queue.dueReviews.length ||
+      queue.recheckWords.length ||
+      queue.triageCandidates.length ||
+      queue.deferredReviews.length
+  );
+}
+
+/** Would a fresh set have anything at all, ignoring today's quotas/backlog? */
+async function freshSetWouldHaveAnything(todayStr) {
+  return queueHasAnything(await planner.buildDailyQueue(todayStr, null));
+}
+
+export async function getItemContext(todayStr) {
+  const setId = await getCurrentSetId();
+  const queue = await planner.buildDailyQueue(todayStr, setId);
   const item = await nextItem(queue);
 
   if (item.kind === "done") {
     await planner.maybeCompleteDailyPlan(todayStr, queue);
-    // If we weren't already ignoring caps, there may be more available -
-    // offer the user a way to keep going past today's normal limits.
-    item.canForceMore = !ignoreCaps;
+    // This set is finished - offer a fresh one only if there's actually
+    // more to study (otherwise the button would just bounce right back here).
+    item.canStartNewSet = await freshSetWouldHaveAnything(todayStr);
   }
 
   if (item.kind === "review") {
@@ -43,43 +59,44 @@ export async function getItemContext(todayStr, { ignoreCaps = false } = {}) {
     item.wordStats = await stats.wordHistory(item.userWord.wordId);
   }
 
-  const done = (await planner.answeredTodayCount(todayStr)) + (await planner.triagedTodayCount(todayStr));
+  const done = (await planner.answeredInSetCount(setId)) + (await planner.triagedInSetCount(setId));
   const remaining =
     queue.dueReviews.length + queue.recheckWords.length + queue.triageCandidates.length + queue.deferredReviews.length;
   item.progressDone = done;
   item.progressTotal = done + remaining;
-  item.sessionStats = await stats.todaySessionStats(todayStr);
+  item.sessionStats = await stats.currentSetStats(setId);
+  item.setId = setId;
 
   return item;
 }
 
-function queueHasAnything(queue) {
-  return Boolean(
-    queue.dueReviews.length ||
-      queue.recheckWords.length ||
-      queue.triageCandidates.length ||
-      queue.deferredReviews.length
-  );
+export async function beginNewSet() {
+  return startNewSet();
 }
 
 export async function dashboardContext(todayStr) {
-  const queue = await planner.buildDailyQueue(todayStr);
+  let setId = await getCurrentSetId();
+  let queue = await planner.buildDailyQueue(todayStr, setId);
   await planner.maybeCompleteDailyPlan(todayStr, queue);
 
-  const unknownToday = await planner.unknownTriagedTodayCountPublic(todayStr);
-  const doneToday = (await planner.answeredTodayCount(todayStr)) + (await planner.triagedTodayCount(todayStr));
+  const hasAnythingNormally = queueHasAnything(queue);
+  let onlyViaNewSet = false;
+  if (!hasAnythingNormally) {
+    const wouldFreshSetHelp = await freshSetWouldHaveAnything(todayStr);
+    if (wouldFreshSetHelp) {
+      // The current set is spent but there's more to study - open a new one
+      // right away so the dashboard's start button just works.
+      setId = await startNewSet();
+      queue = await planner.buildDailyQueue(todayStr, setId);
+      onlyViaNewSet = true;
+    }
+  }
+
+  const unknownToday = await planner.unknownTriagedInSetCountPublic(setId);
+  const doneToday = (await planner.answeredInSetCount(setId)) + (await planner.triagedInSetCount(setId));
   const { loadSettings } = await import("./data/settings.js");
   const settings = await loadSettings();
   const remainingNewWords = Math.max(settings.daily_new_words - unknownToday, 0);
-
-  // The dashboard's "start studying" button should stay available as long as
-  // there is ANYTHING left in the pool, even past today's normal caps - the
-  // caps still apply once inside a session (with a "keep going anyway" way
-  // out there), but the entry point itself should never just vanish.
-  const hasAnythingNormally = queueHasAnything(queue);
-  const hasAnythingAtAll = hasAnythingNormally
-    ? true
-    : queueHasAnything(await planner.buildDailyQueue(todayStr, { ignoreCaps: true }));
 
   return {
     pendingReviews: queue.dueReviews.length + queue.deferredReviews.length,
@@ -88,7 +105,7 @@ export async function dashboardContext(todayStr) {
     streak: await planner.currentStreak(todayStr),
     backlogBlocked: queue.backlogBlocked,
     backlogCount: queue.backlogCount,
-    hasAnythingToDo: hasAnythingAtAll,
-    onlyViaOverride: hasAnythingAtAll && !hasAnythingNormally,
+    hasAnythingToDo: queueHasAnything(queue),
+    onlyViaNewSet,
   };
 }

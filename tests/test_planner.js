@@ -7,6 +7,8 @@ import { addWorkdays } from "../js/logic/workdays.js";
 
 const MONDAY = "2026-01-05";
 const SATURDAY = "2026-01-03";
+const SET = "test-set-1";
+const SET2 = "test-set-2";
 
 async function reset() {
   for (const s of STORE_NAMES) await clear(s);
@@ -99,11 +101,11 @@ await reset();
   const d = await makeWord({ wort: "D", quelle: "b2_kern", source_id: 1 });
   for (const w of [a, b, c, d]) await makeUserWord(w);
 
-  const candidates = await planner.triageCandidatesQueryset(MONDAY);
+  const candidates = await planner.triageCandidatesQueryset(SET);
   assert.deepStrictEqual(candidates.map((c) => c.word.wort), ["C", "B", "D", "A"]);
 }
 
-// --- daily quota does not count known words ---
+// --- set quota does not count known words ---
 await reset();
 {
   await saveSettings({ daily_new_words: 3, triage_cap: 40 });
@@ -112,13 +114,13 @@ await reset();
   const userWords = [];
   for (const w of words) userWords.push(await makeUserWord(w));
 
-  await planner.applyTriage(userWords[0], "known", MONDAY);
-  await planner.applyTriage(userWords[1], "unknown", MONDAY);
-  await planner.applyTriage(userWords[2], "unknown", MONDAY);
-  await planner.applyTriage(userWords[3], "unknown", MONDAY);
+  await planner.applyTriage(userWords[0], "known", MONDAY, SET);
+  await planner.applyTriage(userWords[1], "unknown", MONDAY, SET);
+  await planner.applyTriage(userWords[2], "unknown", MONDAY, SET);
+  await planner.applyTriage(userWords[3], "unknown", MONDAY, SET);
 
-  assert.strictEqual(await planner.unknownTriagedTodayCountPublic(MONDAY), 3);
-  assert.deepStrictEqual(await planner.pullNextTriageBatch(MONDAY), []);
+  assert.strictEqual(await planner.unknownTriagedInSetCountPublic(SET), 3);
+  assert.deepStrictEqual(await planner.pullNextTriageBatch(SET), []);
 }
 
 // --- known triage results do not block further candidates ---
@@ -130,13 +132,13 @@ await reset();
   const userWords = [];
   for (const w of words) userWords.push(await makeUserWord(w));
 
-  for (const uw of userWords.slice(0, 3)) await planner.applyTriage(uw, "known", MONDAY);
+  for (const uw of userWords.slice(0, 3)) await planner.applyTriage(uw, "known", MONDAY, SET);
 
-  const batch = await planner.pullNextTriageBatch(MONDAY);
+  const batch = await planner.pullNextTriageBatch(SET);
   assert.strictEqual(batch.length, 2);
 }
 
-// --- triage_cap ceiling stops the day even below quota ---
+// --- triage_cap ceiling stops the set even below quota ---
 await reset();
 {
   await saveSettings({ daily_new_words: 10, triage_cap: 3 });
@@ -145,9 +147,9 @@ await reset();
   const userWords = [];
   for (const w of words) userWords.push(await makeUserWord(w));
 
-  for (const uw of userWords.slice(0, 3)) await planner.applyTriage(uw, "known", MONDAY);
+  for (const uw of userWords.slice(0, 3)) await planner.applyTriage(uw, "known", MONDAY, SET);
 
-  assert.deepStrictEqual(await planner.pullNextTriageBatch(MONDAY), []);
+  assert.deepStrictEqual(await planner.pullNextTriageBatch(SET), []);
 }
 
 // --- backlog blocks new word flow and resumes below threshold ---
@@ -164,7 +166,7 @@ await reset();
     overdueCards.push(await makeReviewCard(w, { due_on: addWorkdays(MONDAY, -1) }));
   }
 
-  let queue = await planner.buildDailyQueue(MONDAY);
+  let queue = await planner.buildDailyQueue(MONDAY, SET);
   assert.strictEqual(queue.backlogBlocked, true);
   assert.deepStrictEqual(queue.triageCandidates, []);
 
@@ -172,7 +174,7 @@ await reset();
   const { remove } = await import("../js/data/db.js");
   await remove("reviewCards", overdueCards[0].cardId);
 
-  queue = await planner.buildDailyQueue(MONDAY);
+  queue = await planner.buildDailyQueue(MONDAY, SET);
   assert.strictEqual(queue.backlogBlocked, false);
   assert.strictEqual(queue.triageCandidates.length, 1);
 }
@@ -185,11 +187,11 @@ await reset();
     const w = await makeWord();
     await makeReviewCard(w, { due_on: MONDAY });
   }
-  const queue = await planner.buildDailyQueue(MONDAY);
+  const queue = await planner.buildDailyQueue(MONDAY, SET);
   assert.strictEqual(queue.dueReviews.length, 2);
 }
 
-// --- review_cap counts answers already done today ---
+// --- review_cap counts answers already done in this set ---
 await reset();
 {
   await saveSettings({ review_cap: 2 });
@@ -199,17 +201,17 @@ await reset();
     alreadyAnswered.push(await makeReviewCard(w, { due_on: MONDAY }));
   }
   for (const card of alreadyAnswered) {
-    await planner.submitReviewAnswer(card, true, "meaning", MONDAY);
+    await planner.submitReviewAnswer(card, true, "meaning", MONDAY, SET);
   }
   for (let i = 0; i < 2; i++) {
     const w = await makeWord();
     await makeReviewCard(w, { due_on: MONDAY });
   }
-  const queue = await planner.buildDailyQueue(MONDAY);
+  const queue = await planner.buildDailyQueue(MONDAY, SET);
   assert.deepStrictEqual(queue.dueReviews, []);
 }
 
-// --- card created by today's triage is deferred, not shown immediately ---
+// --- card created by this set's triage is deferred, not shown immediately ---
 await reset();
 {
   await saveSettings({ daily_new_words: 10, triage_cap: 40 });
@@ -218,9 +220,9 @@ await reset();
   const w2 = await makeWord({ source_id: 2 });
   const otherNewWord = await makeUserWord(w2);
 
-  await planner.applyTriage(triagedWord, "unknown", MONDAY);
+  await planner.applyTriage(triagedWord, "unknown", MONDAY, SET);
 
-  const queue = await planner.buildDailyQueue(MONDAY);
+  const queue = await planner.buildDailyQueue(MONDAY, SET);
   assert.deepStrictEqual(queue.dueReviews, []);
   assert.strictEqual(queue.deferredReviews.length, 1);
   assert.strictEqual(queue.deferredReviews[0].wordId, triagedWord.wordId);
@@ -233,7 +235,7 @@ await reset();
   const w = await makeWord();
   await makeReviewCard(w, { due_on: SATURDAY });
 
-  const queue = await planner.buildDailyQueue(SATURDAY);
+  const queue = await planner.buildDailyQueue(SATURDAY, SET);
   assert.strictEqual(queue.dueReviews.length, 1);
 }
 
@@ -242,7 +244,7 @@ await reset();
   const w = await makeWord();
   await makeUserWord(w);
 
-  const queue = await planner.buildDailyQueue(SATURDAY);
+  const queue = await planner.buildDailyQueue(SATURDAY, SET);
   assert.strictEqual(queue.triageCandidates.length, 1);
 }
 
@@ -275,7 +277,7 @@ await reset();
   const w = await makeWord();
   const card = await makeReviewCard(w, { box: 2, due_on: MONDAY });
 
-  const log = await planner.submitReviewAnswer(card, true, "meaning", MONDAY);
+  const log = await planner.submitReviewAnswer(card, true, "meaning", MONDAY, SET);
   assert.strictEqual(card.box, 3);
   assert.strictEqual(log.box_before, 2);
   assert.strictEqual(log.box_after, 3);
@@ -289,7 +291,7 @@ await reset();
   const uw = await makeUserWord(w);
   const card = await makeReviewCard(w, { box: 2, due_on: MONDAY }); // promotes to box 3
 
-  await planner.submitReviewAnswer(card, true, "production", MONDAY);
+  await planner.submitReviewAnswer(card, true, "production", MONDAY, SET);
 
   const { get } = await import("../js/data/db.js");
   const trDe = await get("reviewCards", `${w.id}::tr_de`);
@@ -297,7 +299,7 @@ await reset();
   assert.strictEqual(trDe.box, 1);
 }
 
-// --- ignoreCaps bypasses triage_cap/review_cap/backlog_threshold ---
+// --- setId === null is an unscoped peek that ignores quotas/backlog ---
 await reset();
 {
   await saveSettings({ daily_new_words: 1, triage_cap: 1, review_cap: 1, backlog_threshold: 1 });
@@ -312,15 +314,31 @@ await reset();
     overdue.push(await makeReviewCard(w, { due_on: addWorkdays(MONDAY, -1) }));
   }
 
-  const normalQueue = await planner.buildDailyQueue(MONDAY);
-  assert.strictEqual(normalQueue.backlogBlocked, true);
-  assert.deepStrictEqual(normalQueue.triageCandidates, []);
-  assert.strictEqual(normalQueue.dueReviews.length, 1);
+  const scopedQueue = await planner.buildDailyQueue(MONDAY, SET);
+  assert.strictEqual(scopedQueue.backlogBlocked, true);
+  assert.deepStrictEqual(scopedQueue.triageCandidates, []);
+  assert.strictEqual(scopedQueue.dueReviews.length, 1);
 
-  const overrideQueue = await planner.buildDailyQueue(MONDAY, { ignoreCaps: true });
-  assert.strictEqual(overrideQueue.backlogBlocked, false);
-  assert.strictEqual(overrideQueue.triageCandidates.length, 5);
-  assert.strictEqual(overrideQueue.dueReviews.length, 3);
+  const peekQueue = await planner.buildDailyQueue(MONDAY, null);
+  assert.strictEqual(peekQueue.backlogBlocked, false);
+  assert.strictEqual(peekQueue.triageCandidates.length, 5);
+  assert.strictEqual(peekQueue.dueReviews.length, 3);
+}
+
+// --- starting a new set resets quotas independently of the exhausted one ---
+await reset();
+{
+  await saveSettings({ daily_new_words: 1, triage_cap: 1 });
+  const words = [];
+  for (let i = 0; i < 3; i++) words.push(await makeWord({ wort: `W${i}`, source_id: i }));
+  const userWords = [];
+  for (const w of words) userWords.push(await makeUserWord(w));
+
+  await planner.applyTriage(userWords[0], "known", MONDAY, SET);
+  assert.deepStrictEqual(await planner.pullNextTriageBatch(SET), []); // SET is spent
+
+  const batchInSet2 = await planner.pullNextTriageBatch(SET2);
+  assert.strictEqual(batchInSet2.length, 1); // fresh quota in a new set
 }
 
 console.log("test_planner.js: all assertions passed");

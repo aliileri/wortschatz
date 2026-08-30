@@ -52,8 +52,8 @@ export async function dailyAnswerCounts(days = 30, todayStr = todayFn()) {
   return results;
 }
 
-export async function todaySessionStats(todayStr = todayFn()) {
-  const logs = await getAllByIndex("reviewLogs", "dateKey", todayStr);
+export async function currentSetStats(setId) {
+  const logs = setId === null ? [] : await getAllByIndex("reviewLogs", "setId", setId);
   const newKnown = logs.filter((l) => l.result === "triage_known").length;
   const newUnknown = logs.filter((l) => l.result === "triage_unknown").length;
   const reviewLogs = logs.filter((l) => REVIEW_QUESTION_TYPES.includes(l.question_type));

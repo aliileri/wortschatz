@@ -1,9 +1,16 @@
-// Daily flow orchestration and the load-brake mechanism - the DB-backed
+// Study-flow orchestration and the load-brake mechanism - the DB-backed
 // counterpart of the pure logic in js/logic/. Mirrors vocab/services/planner.py,
-// vocab/services/triage.py, vocab/services/direction.py, vocab/services/recheck.py.
-import { get, put, getAll, getAllByIndex, tx } from "./db.js";
+// vocab/services/triage.py, vocab/services/direction.py, vocab/services/recheck.py,
+// but with one deliberate deviation from the original Django spec: quotas
+// (daily_new_words/triage_cap/review_cap) are scoped to a "set" (an
+// open-ended study batch, see js/data/sets.js) instead of a calendar day.
+// There's no daily cap on how much you can study - starting a new set just
+// resets the counters. Card due-dates (Leitner box scheduling) still run on
+// real elapsed time, unaffected by this - that's what makes spaced
+// repetition actually work, and changing it was explicitly ruled out.
+import { get, put, getAll, getAllByIndex } from "./db.js";
 import { loadSettings } from "./settings.js";
-import { today as todayFn, nowIso, dateKeyOf } from "./clock.js";
+import { today as todayFn, nowIso } from "./clock.js";
 import { applyAnswer as leitnerApplyAnswer } from "../logic/leitner.js";
 import { shouldUnlockTrDe, isMastered } from "../logic/direction.js";
 import { resolveTriageChoice } from "../logic/triage.js";
@@ -14,10 +21,6 @@ const REVIEW_QUESTION_TYPES = ["meaning", "production", "cloze"];
 
 function cardId(wordId, direction) {
   return `${wordId}::${direction}`;
-}
-
-async function logsToday(todayStr) {
-  return getAllByIndex("reviewLogs", "dateKey", todayStr);
 }
 
 async function activeCards() {
@@ -36,25 +39,23 @@ export async function isBacklogBlocked(todayStr = todayFn()) {
   return overdue > settings.backlog_threshold;
 }
 
+// ---- calendar-day-scoped helpers: used only for historical bookkeeping
+// (DailyPlan / streak / the 30-day stats chart), never for quota gating. ----
+
+async function logsToday(todayStr) {
+  return getAllByIndex("reviewLogs", "dateKey", todayStr);
+}
+
 async function answeredTodayCardIds(todayStr) {
   const logs = await logsToday(todayStr);
   return new Set(
-    logs
-      .filter((l) => REVIEW_QUESTION_TYPES.includes(l.question_type) && l.cardId)
-      .map((l) => l.cardId)
+    logs.filter((l) => REVIEW_QUESTION_TYPES.includes(l.question_type) && l.cardId).map((l) => l.cardId)
   );
 }
 
 async function triagedTodayWordIds(todayStr) {
   const logs = await logsToday(todayStr);
   return new Set(logs.filter((l) => l.question_type === "triage").map((l) => l.wordId));
-}
-
-async function triagedTodayCardIds(todayStr) {
-  const logs = await logsToday(todayStr);
-  return new Set(
-    logs.filter((l) => l.question_type === "triage" && l.cardId).map((l) => l.cardId)
-  );
 }
 
 async function unknownTriagedTodayCount(todayStr) {
@@ -67,9 +68,40 @@ async function rechecksAnsweredTodayWordIds(todayStr) {
   return new Set(logs.filter((l) => l.question_type === "recheck").map((l) => l.wordId));
 }
 
-export async function triageCandidatesQueryset(todayStr = todayFn()) {
+// ---- set-scoped helpers: used for quota gating (daily_new_words/triage_cap/
+// review_cap). A `null` setId means "unscoped" - used only to peek at what a
+// brand new set would contain, without committing to opening one. ----
+
+async function logsInSet(setId) {
+  if (setId === null) return [];
+  return getAllByIndex("reviewLogs", "setId", setId);
+}
+
+async function answeredInSetCardIds(setId) {
+  const logs = await logsInSet(setId);
+  return new Set(
+    logs.filter((l) => REVIEW_QUESTION_TYPES.includes(l.question_type) && l.cardId).map((l) => l.cardId)
+  );
+}
+
+async function triagedInSetWordIds(setId) {
+  const logs = await logsInSet(setId);
+  return new Set(logs.filter((l) => l.question_type === "triage").map((l) => l.wordId));
+}
+
+async function triagedInSetCardIds(setId) {
+  const logs = await logsInSet(setId);
+  return new Set(logs.filter((l) => l.question_type === "triage" && l.cardId).map((l) => l.cardId));
+}
+
+async function unknownTriagedInSetCount(setId) {
+  const logs = await logsInSet(setId);
+  return logs.filter((l) => l.result === "triage_unknown").length;
+}
+
+export async function triageCandidatesQueryset(setId) {
   const settings = await loadSettings();
-  const alreadyTriaged = await triagedTodayWordIds(todayStr);
+  const alreadyTriaged = await triagedInSetWordIds(setId);
   const newUserWords = await getAllByIndex("userWords", "status", "new");
   const words = await getAll("words");
   const wordsById = new Map(words.map((w) => [w.id, w]));
@@ -89,19 +121,18 @@ export async function triageCandidatesQueryset(todayStr = todayFn()) {
   return candidates;
 }
 
-export async function pullNextTriageBatch(todayStr = todayFn(), { ignoreCaps = false } = {}) {
-  const settings = await loadSettings();
-  const candidates = await triageCandidatesQueryset(todayStr);
+export async function pullNextTriageBatch(setId) {
+  const candidates = await triageCandidatesQueryset(setId);
 
-  if (ignoreCaps) {
-    // "Yine de devam et" - the user explicitly asked to keep going past the
-    // load-brake caps for this one session. Still batch it so a single click
-    // doesn't try to dump the entire remaining pool into one queue.
+  if (setId === null) {
+    // Unscoped peek - just report what's theoretically available, batched so
+    // a caller doesn't accidentally treat "981 candidates" as "queue depth".
     return candidates.slice(0, 50);
   }
 
-  const unknownSoFar = await unknownTriagedTodayCount(todayStr);
-  const triagedWordIds = await triagedTodayWordIds(todayStr);
+  const settings = await loadSettings();
+  const unknownSoFar = await unknownTriagedInSetCount(setId);
+  const triagedWordIds = await triagedInSetWordIds(setId);
   const triagedSoFar = triagedWordIds.size;
 
   const remainingUnknownQuota = settings.daily_new_words - unknownSoFar;
@@ -133,18 +164,24 @@ export async function dueReviewsQueryset(todayStr = todayFn()) {
   return cards.filter((c) => c.due_on <= todayStr).sort((a, b) => (a.due_on < b.due_on ? -1 : a.due_on > b.due_on ? 1 : 0));
 }
 
-export async function buildDailyQueue(todayStr = todayFn(), { ignoreCaps = false } = {}) {
+/**
+ * @param {string} todayStr - real calendar date, still governs due-dates,
+ *   backlog, and the monthly recheck - none of that is set-scoped.
+ * @param {string|null} setId - the current set for quota gating, or null to
+ *   peek at what a fresh set would contain without opening one.
+ */
+export async function buildDailyQueue(todayStr = todayFn(), setId = null) {
   const settings = await loadSettings();
 
   const backlogCount = await overdueCardCount(todayStr);
-  const backlogBlocked = !ignoreCaps && backlogCount > settings.backlog_threshold;
+  const backlogBlocked = setId !== null && backlogCount > settings.backlog_threshold;
 
-  const answeredToday = await answeredTodayCardIds(todayStr);
-  const remainingReviewCap = ignoreCaps ? Infinity : Math.max(settings.review_cap - answeredToday.size, 0);
-  const freshFromTriage = await triagedTodayCardIds(todayStr);
+  const answeredInSet = await answeredInSetCardIds(setId);
+  const remainingReviewCap = setId === null ? Infinity : Math.max(settings.review_cap - answeredInSet.size, 0);
+  const freshFromTriage = await triagedInSetCardIds(setId);
 
   const allDueRaw = await dueReviewsQueryset(todayStr);
-  const allDue = allDueRaw.filter((c) => !answeredToday.has(c.cardId));
+  const allDue = allDueRaw.filter((c) => !answeredInSet.has(c.cardId));
   const carriedOver = allDue.filter((c) => !freshFromTriage.has(c.cardId));
   const justTriaged = allDue.filter((c) => freshFromTriage.has(c.cardId));
 
@@ -153,7 +190,7 @@ export async function buildDailyQueue(todayStr = todayFn(), { ignoreCaps = false
   const deferredReviews = justTriaged.slice(0, remainingAfterCarried);
 
   const recheckWords = await buildRecheckQueue(todayStr);
-  const triageCandidates = backlogBlocked ? [] : await pullNextTriageBatch(todayStr, { ignoreCaps });
+  const triageCandidates = backlogBlocked ? [] : await pullNextTriageBatch(setId);
 
   return {
     dueReviews, recheckWords, triageCandidates, deferredReviews,
@@ -161,7 +198,7 @@ export async function buildDailyQueue(todayStr = todayFn(), { ignoreCaps = false
   };
 }
 
-export async function submitReviewAnswer(card, correct, questionType, todayStr = todayFn()) {
+export async function submitReviewAnswer(card, correct, questionType, todayStr = todayFn(), setId = null) {
   const boxBefore = card.box;
   leitnerApplyAnswer(card, correct, todayStr);
   await put("reviewCards", card);
@@ -197,6 +234,7 @@ export async function submitReviewAnswer(card, correct, questionType, todayStr =
     wordId: card.wordId,
     answered_at: nowIso(),
     dateKey: todayStr,
+    setId,
     result: correct ? "correct" : "wrong",
     box_before: boxBefore,
     box_after: card.box,
@@ -206,7 +244,7 @@ export async function submitReviewAnswer(card, correct, questionType, todayStr =
   return log;
 }
 
-export async function applyTriage(userWord, choice, todayStr = todayFn()) {
+export async function applyTriage(userWord, choice, todayStr = todayFn(), setId = null) {
   const resolved = resolveTriageChoice(choice);
   userWord.status = resolved.status;
   userWord.triaged_at = nowIso();
@@ -235,6 +273,7 @@ export async function applyTriage(userWord, choice, todayStr = todayFn()) {
     wordId: userWord.wordId,
     answered_at: nowIso(),
     dateKey: todayStr,
+    setId,
     result: choice === "known" ? "triage_known" : "triage_unknown",
     box_before: null,
     box_after: resolved.startingBox,
@@ -276,6 +315,7 @@ export async function applyRecheckAnswer(userWord, passed, todayStr = todayFn())
     wordId: userWord.wordId,
     answered_at: nowIso(),
     dateKey: todayStr,
+    setId: null,
     result,
     box_before: null,
     box_after: null,
@@ -283,16 +323,16 @@ export async function applyRecheckAnswer(userWord, passed, todayStr = todayFn())
   });
 }
 
-export async function answeredTodayCount(todayStr = todayFn()) {
-  return (await answeredTodayCardIds(todayStr)).size;
+export async function answeredInSetCount(setId) {
+  return (await answeredInSetCardIds(setId)).size;
 }
 
-export async function triagedTodayCount(todayStr = todayFn()) {
-  return (await triagedTodayWordIds(todayStr)).size;
+export async function triagedInSetCount(setId) {
+  return (await triagedInSetWordIds(setId)).size;
 }
 
-export async function unknownTriagedTodayCountPublic(todayStr = todayFn()) {
-  return unknownTriagedTodayCount(todayStr);
+export async function unknownTriagedInSetCountPublic(setId) {
+  return unknownTriagedInSetCount(setId);
 }
 
 export async function recordDailyPlan(todayStr = todayFn()) {
@@ -301,13 +341,14 @@ export async function recordDailyPlan(todayStr = todayFn()) {
     plan = { date: todayStr, is_workday: isWorkday(todayStr), completed_at: null, weak_words_paragraph: "" };
   }
   plan.new_words_added = await unknownTriagedTodayCount(todayStr);
-  plan.triaged_count = await triagedTodayCount(todayStr);
+  plan.triaged_count = (await triagedTodayWordIds(todayStr)).size;
   const logs = await logsToday(todayStr);
   plan.reviews_done = logs.filter((l) => REVIEW_QUESTION_TYPES.includes(l.question_type)).length;
   await put("dailyPlans", plan);
   return plan;
 }
 
+/** Marks the calendar day complete the first time any one set's queue empties out that day. */
 export async function maybeCompleteDailyPlan(todayStr, queue) {
   const plan = await recordDailyPlan(todayStr);
   const nothingLeft =

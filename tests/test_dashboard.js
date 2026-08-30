@@ -1,8 +1,9 @@
 import "fake-indexeddb/auto";
 import assert from "node:assert";
-import { clear, put, STORE_NAMES } from "../js/data/db.js";
+import { clear, put, get, STORE_NAMES } from "../js/data/db.js";
 import { saveSettings } from "../js/data/settings.js";
 import * as planner from "../js/data/planner.js";
+import { getCurrentSetId } from "../js/data/sets.js";
 import { dashboardContext } from "../js/studyFlow.js";
 
 async function reset() {
@@ -18,35 +19,39 @@ async function makeWord(id) {
   return word;
 }
 
-// hasAnythingToDo true and onlyViaOverride false under normal conditions
+// hasAnythingToDo true and onlyViaNewSet false under normal conditions
 await reset();
 {
   await makeWord("w1");
   const ctx = await dashboardContext(MONDAY);
   assert.strictEqual(ctx.hasAnythingToDo, true);
-  assert.strictEqual(ctx.onlyViaOverride, false);
+  assert.strictEqual(ctx.onlyViaNewSet, false);
 }
 
-// once daily_new_words/triage_cap are exhausted, dashboard should still say
-// hasAnythingToDo (via override) instead of silently going empty
+// once the current set's triage_cap is exhausted, the dashboard should
+// silently open a fresh set rather than the start button just disappearing
 await reset();
 {
   await saveSettings({ triage_cap: 1 });
   const words = [];
   for (let i = 0; i < 3; i++) words.push(await makeWord(`w${i}`));
 
+  const setId = await getCurrentSetId();
   // exhaust triage_cap with one "known" answer (doesn't spawn a review card,
   // so deferredReviews/dueReviews stay empty too - a clean "done" state)
-  const { get } = await import("../js/data/db.js");
   const uw0 = await get("userWords", "w0");
-  await planner.applyTriage(uw0, "known", MONDAY);
+  await planner.applyTriage(uw0, "known", MONDAY, setId);
 
-  const normalQueue = await planner.buildDailyQueue(MONDAY);
-  assert.deepStrictEqual(normalQueue.triageCandidates, []); // quota/cap exhausted
+  const scopedQueue = await planner.buildDailyQueue(MONDAY, setId);
+  assert.deepStrictEqual(scopedQueue.triageCandidates, []); // quota/cap exhausted
 
   const ctx = await dashboardContext(MONDAY);
   assert.strictEqual(ctx.hasAnythingToDo, true, "dashboard button must not disappear");
-  assert.strictEqual(ctx.onlyViaOverride, true);
+  assert.strictEqual(ctx.onlyViaNewSet, true);
+
+  // and it actually opened a new set - not just reporting a stale truth
+  const newSetId = await getCurrentSetId();
+  assert.notStrictEqual(newSetId, setId);
 }
 
 // truly nothing left anywhere -> hasAnythingToDo is finally false
