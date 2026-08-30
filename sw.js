@@ -1,7 +1,7 @@
 // Full offline app shell. This app has no server to fall back to, so after
 // the first successful load everything - including the 1057-word dataset -
 // must be servable straight from the cache, airplane mode included.
-const CACHE_NAME = "wortschatz-shell-v4";
+const CACHE_NAME = "wortschatz-shell-v5";
 
 const SHELL_ASSETS = [
   "./",

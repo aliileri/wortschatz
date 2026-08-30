@@ -20,12 +20,15 @@ function nextItem(queue) {
   return { kind: "done", backlogBlocked: queue.backlogBlocked };
 }
 
-export async function getItemContext(todayStr) {
-  const queue = await planner.buildDailyQueue(todayStr);
+export async function getItemContext(todayStr, { ignoreCaps = false } = {}) {
+  const queue = await planner.buildDailyQueue(todayStr, { ignoreCaps });
   const item = await nextItem(queue);
 
   if (item.kind === "done") {
     await planner.maybeCompleteDailyPlan(todayStr, queue);
+    // If we weren't already ignoring caps, there may be more available -
+    // offer the user a way to keep going past today's normal limits.
+    item.canForceMore = !ignoreCaps;
   }
 
   if (item.kind === "review") {

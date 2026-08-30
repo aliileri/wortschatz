@@ -89,8 +89,17 @@ export async function triageCandidatesQueryset(todayStr = todayFn()) {
   return candidates;
 }
 
-export async function pullNextTriageBatch(todayStr = todayFn()) {
+export async function pullNextTriageBatch(todayStr = todayFn(), { ignoreCaps = false } = {}) {
   const settings = await loadSettings();
+  const candidates = await triageCandidatesQueryset(todayStr);
+
+  if (ignoreCaps) {
+    // "Yine de devam et" - the user explicitly asked to keep going past the
+    // load-brake caps for this one session. Still batch it so a single click
+    // doesn't try to dump the entire remaining pool into one queue.
+    return candidates.slice(0, 50);
+  }
+
   const unknownSoFar = await unknownTriagedTodayCount(todayStr);
   const triagedWordIds = await triagedTodayWordIds(todayStr);
   const triagedSoFar = triagedWordIds.size;
@@ -99,7 +108,6 @@ export async function pullNextTriageBatch(todayStr = todayFn()) {
   const remainingTriageCap = settings.triage_cap - triagedSoFar;
   if (remainingUnknownQuota <= 0 || remainingTriageCap <= 0) return [];
 
-  const candidates = await triageCandidatesQueryset(todayStr);
   return candidates.slice(0, remainingTriageCap);
 }
 
@@ -125,14 +133,14 @@ export async function dueReviewsQueryset(todayStr = todayFn()) {
   return cards.filter((c) => c.due_on <= todayStr).sort((a, b) => (a.due_on < b.due_on ? -1 : a.due_on > b.due_on ? 1 : 0));
 }
 
-export async function buildDailyQueue(todayStr = todayFn()) {
+export async function buildDailyQueue(todayStr = todayFn(), { ignoreCaps = false } = {}) {
   const settings = await loadSettings();
 
   const backlogCount = await overdueCardCount(todayStr);
-  const backlogBlocked = backlogCount > settings.backlog_threshold;
+  const backlogBlocked = !ignoreCaps && backlogCount > settings.backlog_threshold;
 
   const answeredToday = await answeredTodayCardIds(todayStr);
-  const remainingReviewCap = Math.max(settings.review_cap - answeredToday.size, 0);
+  const remainingReviewCap = ignoreCaps ? Infinity : Math.max(settings.review_cap - answeredToday.size, 0);
   const freshFromTriage = await triagedTodayCardIds(todayStr);
 
   const allDueRaw = await dueReviewsQueryset(todayStr);
@@ -145,7 +153,7 @@ export async function buildDailyQueue(todayStr = todayFn()) {
   const deferredReviews = justTriaged.slice(0, remainingAfterCarried);
 
   const recheckWords = await buildRecheckQueue(todayStr);
-  const triageCandidates = backlogBlocked ? [] : await pullNextTriageBatch(todayStr);
+  const triageCandidates = backlogBlocked ? [] : await pullNextTriageBatch(todayStr, { ignoreCaps });
 
   return {
     dueReviews, recheckWords, triageCandidates, deferredReviews,

@@ -297,4 +297,30 @@ await reset();
   assert.strictEqual(trDe.box, 1);
 }
 
+// --- ignoreCaps bypasses triage_cap/review_cap/backlog_threshold ---
+await reset();
+{
+  await saveSettings({ daily_new_words: 1, triage_cap: 1, review_cap: 1, backlog_threshold: 1 });
+
+  const words = [];
+  for (let i = 0; i < 5; i++) words.push(await makeWord({ wort: `W${i}`, source_id: i }));
+  for (const w of words) await makeUserWord(w);
+
+  const overdue = [];
+  for (let i = 0; i < 3; i++) {
+    const w = await makeWord({ wort: `OD${i}` });
+    overdue.push(await makeReviewCard(w, { due_on: addWorkdays(MONDAY, -1) }));
+  }
+
+  const normalQueue = await planner.buildDailyQueue(MONDAY);
+  assert.strictEqual(normalQueue.backlogBlocked, true);
+  assert.deepStrictEqual(normalQueue.triageCandidates, []);
+  assert.strictEqual(normalQueue.dueReviews.length, 1);
+
+  const overrideQueue = await planner.buildDailyQueue(MONDAY, { ignoreCaps: true });
+  assert.strictEqual(overrideQueue.backlogBlocked, false);
+  assert.strictEqual(overrideQueue.triageCandidates.length, 5);
+  assert.strictEqual(overrideQueue.dueReviews.length, 3);
+}
+
 console.log("test_planner.js: all assertions passed");

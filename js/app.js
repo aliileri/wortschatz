@@ -13,6 +13,7 @@ const navEl = document.getElementById("app-nav");
 
 let currentItem = null; // the study item currently on screen (for answer handlers)
 let pendingAlmost = null; // {card, question} while the "almost correct" confirm is shown
+let overrideCapsForSession = false; // set once the user taps "Yine de devam et"; stays on until reload
 const QUELLE_LABELS = { kursbuch: "Kursbuch" };
 const NIVEAU_VALUES = ["A1", "A2", "B1", "B2"];
 const WORTART_VALUES = [
@@ -125,9 +126,10 @@ async function renderDashboard() {
 
 // ---------- study ----------
 
-async function renderStudy() {
+async function renderStudy(opts = {}) {
   pendingAlmost = null;
-  const item = await getItemContext(todayStr());
+  const ignoreCaps = opts.ignoreCaps ?? overrideCapsForSession;
+  const item = await getItemContext(todayStr(), { ignoreCaps });
   currentItem = item;
   root.innerHTML = studyChromeHtml(item) + itemBodyHtml(item);
 }
@@ -158,7 +160,10 @@ function itemBodyHtml(item) {
   if (item.kind === "done") {
     return `<div class="card study-card">
       <p>Bugün için her şey tamamlandı. 🎉</p>
-      <a class="btn btn--secondary" href="#/dashboard">Panele dön</a>
+      <div class="btn-row">
+        ${item.canForceMore ? `<button class="btn btn--primary" data-action="continue-anyway">Yine de devam et</button>` : ""}
+        <a class="btn btn--secondary" href="#/dashboard">Panele dön</a>
+      </div>
     </div>`;
   }
   if (item.kind === "triage") return triageItemHtml(item);
@@ -579,6 +584,11 @@ function wireGlobalHandlers() {
       await planner.submitReviewAnswer(card, btn.dataset.choice === "correct", question.type, todayStr());
       pendingAlmost = null;
       return renderStudy();
+    }
+    if (action === "continue-anyway") {
+      e.preventDefault();
+      overrideCapsForSession = true;
+      return renderStudy({ ignoreCaps: true });
     }
     if (btn.id === "reimport-btn") return handleReimport();
     if (btn.id === "reset-progress-btn") return handleResetProgress();
