@@ -1,0 +1,12 @@
+{
+  "name": "wortschatz-webapp",
+  "private": true,
+  "type": "module",
+  "description": "Dev-only test runner for the offline Wortschatz PWA. Not used by the app itself at runtime.",
+  "scripts": {
+    "test": "for f in tests/test_*.js; do node \"$f\" || exit 1; done"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.0.0"
+  }
+}
