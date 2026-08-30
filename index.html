@@ -29,9 +29,25 @@
 
   <script type="module" src="js/app.js"></script>
   <script>
+    // An installed home-screen app on iOS is often just resumed from the
+    // background rather than freshly reloaded, so a normal "reload the page"
+    // update flow can go unnoticed for a long time. This forces an update
+    // check whenever the app becomes visible again, and reloads immediately
+    // once a new version has actually taken control - no manual force-quit
+    // needed for an update to reach the screen.
     if ("serviceWorker" in navigator) {
-      window.addEventListener("load", () => {
-        navigator.serviceWorker.register("sw.js", { scope: "./" });
+      window.addEventListener("load", async () => {
+        const reg = await navigator.serviceWorker.register("sw.js", { scope: "./" });
+        reg.update();
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") reg.update();
+        });
+      });
+      let reloadedForUpdate = false;
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (reloadedForUpdate) return;
+        reloadedForUpdate = true;
+        location.reload();
       });
     }
   </script>
