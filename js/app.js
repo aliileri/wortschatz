@@ -109,8 +109,9 @@ async function renderDashboard() {
   }
 
   const action = ctx.hasAnythingToDo
-    ? `<a class="btn btn--primary" href="#/study">Çalışmaya başla</a>`
+    ? `<button class="btn btn--primary" data-action="start-study" type="button">Çalışmaya başla</button>`
     : `<p class="muted">Bugün için her şey tamamlandı. 🎉</p>`;
+  if (ctx.onlyViaOverride) overrideCapsForSession = true;
 
   root.innerHTML = `
     ${banners.join("")}
@@ -589,6 +590,11 @@ function wireGlobalHandlers() {
       e.preventDefault();
       overrideCapsForSession = true;
       return renderStudy({ ignoreCaps: true });
+    }
+    if (action === "start-study") {
+      e.preventDefault();
+      location.hash = "#/study";
+      return;
     }
     if (btn.id === "reimport-btn") return handleReimport();
     if (btn.id === "reset-progress-btn") return handleResetProgress();

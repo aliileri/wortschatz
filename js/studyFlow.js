@@ -53,6 +53,15 @@ export async function getItemContext(todayStr, { ignoreCaps = false } = {}) {
   return item;
 }
 
+function queueHasAnything(queue) {
+  return Boolean(
+    queue.dueReviews.length ||
+      queue.recheckWords.length ||
+      queue.triageCandidates.length ||
+      queue.deferredReviews.length
+  );
+}
+
 export async function dashboardContext(todayStr) {
   const queue = await planner.buildDailyQueue(todayStr);
   await planner.maybeCompleteDailyPlan(todayStr, queue);
@@ -63,6 +72,15 @@ export async function dashboardContext(todayStr) {
   const settings = await loadSettings();
   const remainingNewWords = Math.max(settings.daily_new_words - unknownToday, 0);
 
+  // The dashboard's "start studying" button should stay available as long as
+  // there is ANYTHING left in the pool, even past today's normal caps - the
+  // caps still apply once inside a session (with a "keep going anyway" way
+  // out there), but the entry point itself should never just vanish.
+  const hasAnythingNormally = queueHasAnything(queue);
+  const hasAnythingAtAll = hasAnythingNormally
+    ? true
+    : queueHasAnything(await planner.buildDailyQueue(todayStr, { ignoreCaps: true }));
+
   return {
     pendingReviews: queue.dueReviews.length + queue.deferredReviews.length,
     doneToday,
@@ -70,11 +88,7 @@ export async function dashboardContext(todayStr) {
     streak: await planner.currentStreak(todayStr),
     backlogBlocked: queue.backlogBlocked,
     backlogCount: queue.backlogCount,
-    hasAnythingToDo: Boolean(
-      queue.dueReviews.length ||
-        queue.recheckWords.length ||
-        queue.triageCandidates.length ||
-        queue.deferredReviews.length
-    ),
+    hasAnythingToDo: hasAnythingAtAll,
+    onlyViaOverride: hasAnythingAtAll && !hasAnythingNormally,
   };
 }
