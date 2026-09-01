@@ -35,16 +35,31 @@ async function freshSetWouldHaveAnything(todayStr) {
   return queueHasAnything(await planner.buildDailyQueue(todayStr, null));
 }
 
-export async function getItemContext(todayStr) {
-  const setId = await getCurrentSetId();
-  const queue = await planner.buildDailyQueue(todayStr, setId);
+/**
+ * Build the next study item.
+ *
+ * @param {string} todayStr - real calendar date.
+ * @param {"daily"|"review"} mode - "daily" is the normal triage+review set
+ *   flow; "review" is review-only mode: only due/deferred review cards,
+ *   no recheck/triage, and nothing (set or plan) is marked complete..
+ */
+export async function getItemContext(todayStr, mode = "daily") {
+  const reviewOnly = mode === "review";
+  const setId = reviewOnly ? null : await getCurrentSetId();
+  const queue = await planner.buildDailyQueue(todayStr, setId, reviewOnly);
   const item = await nextItem(queue);
 
   if (item.kind === "done") {
-    await planner.maybeCompleteDailyPlan(todayStr, queue);
-    // This set is finished - offer a fresh one only if there's actually
-    // more to study (otherwise the button would just bounce right back here).
-    item.canStartNewSet = await freshSetWouldHaveAnything(todayStr);
+    if (reviewOnly) {
+      // Review-only mode deliberately skips triage/recheck,so neither this
+      // set-less queue nor today's daily plan should be marked complete here.
+      item.reviewOnly = true;
+    } else {
+      await planner.maybeCompleteDailyPlan(todayStr, queue);
+      // This set is finished - offer a fresh one only if there's actually
+      // more to study (otherwise the button would just bounce right back here).
+      item.canStartNewSet = await freshSetWouldHaveAnything(todayStr);
+    }
   }
 
   if (item.kind === "review") {
@@ -59,13 +74,16 @@ export async function getItemContext(todayStr) {
     item.wordStats = await stats.wordHistory(item.userWord.wordId);
   }
 
-  const done = (await planner.answeredInSetCount(setId)) + (await planner.triagedInSetCount(setId));
+  const done = reviewOnly
+    ? await planner.answeredInSetCount(null)
+    : (await planner.answeredInSetCount(setId)) + (await planner.triagedInSetCount(setId));
   const remaining =
     queue.dueReviews.length + queue.recheckWords.length + queue.triageCandidates.length + queue.deferredReviews.length;
   item.progressDone = done;
   item.progressTotal = done + remaining;
-  item.sessionStats = await stats.currentSetStats(setId);
+  item.sessionStats = await stats.currentSetStats(reviewOnly ? null : setId);
   item.setId = setId;
+  item.reviewOnly = reviewOnly;
 
   return item;
 }
@@ -86,6 +104,7 @@ export async function dashboardContext(todayStr) {
     if (wouldFreshSetHelp) {
       // The current set is spent but there's more to study - open a new one
       // right away so the dashboard's start button just works.
+
       setId = await startNewSet();
       queue = await planner.buildDailyQueue(todayStr, setId);
       onlyViaNewSet = true;

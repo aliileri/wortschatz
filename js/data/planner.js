@@ -170,7 +170,7 @@ export async function dueReviewsQueryset(todayStr = todayFn()) {
  * @param {string|null} setId - the current set for quota gating, or null to
  *   peek at what a fresh set would contain without opening one.
  */
-export async function buildDailyQueue(todayStr = todayFn(), setId = null) {
+export async function buildDailyQueue(todayStr = todayFn(), setId = null, reviewOnly = false) {
   const settings = await loadSettings();
 
   const backlogCount = await overdueCardCount(todayStr);
@@ -188,6 +188,15 @@ export async function buildDailyQueue(todayStr = todayFn(), setId = null) {
   const dueReviews = carriedOver.slice(0, remainingReviewCap);
   const remainingAfterCarried = Math.max(remainingReviewCap - dueReviews.length, 0);
   const deferredReviews = justTriaged.slice(0, remainingAfterCarried);
+  if (reviewOnly) {
+    // Review-only mode: an explicit user choice to practice due cards without
+    // recheck, triage, orthe backlog brake. The review_cap is still respected
+    // and a null setId means "no quota" (unscoped peek/fallback).
+    return {
+      dueReviews, recheckWords: [], triageCandidates: [], deferredReviews,
+      backlogCount, backlogBlocked,
+    };
+  }
 
   const recheckWords = await buildRecheckQueue(todayStr);
   const triageCandidates = backlogBlocked ? [] : await pullNextTriageBatch(setId);

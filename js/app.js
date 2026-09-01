@@ -80,7 +80,7 @@ async function render() {
   updateNav(route);
   try {
     if (route === "dashboard") return renderDashboard();
-    if (route === "study") return renderStudy();
+    if (route === "study" || route === "study/review") return renderStudy();
     if (route === "words") return renderWordList();
     if (route === "stats") return renderStats();
     if (route === "settings") return renderSettings();
@@ -107,6 +107,9 @@ async function renderDashboard() {
     banners.push(`<div class="banner banner--warning">Birikmiş tekrar var, yeni kelime duraklatıldı. Önce ${ctx.backlogCount} kartı temizle.</div>`);
   }
 
+  const reviewOnlyBtn = ctx.pendingReviews > 0
+    ? `<a class="btn btn--secondary" href="#/study/review" type="button">Sadece Tekrar</a>`
+    : "";
   const action = ctx.hasAnythingToDo
     ? `<button class="btn btn--primary" data-action="start-study" type="button">Çalışmaya başla</button>`
     : `<p class="muted">Öğrenilecek yeni bir şey kalmadı. 🎉</p>`;
@@ -119,7 +122,7 @@ async function renderDashboard() {
       <div class="stat-tile"><span class="stat-tile__value">${ctx.remainingNewWords}</span><span class="stat-tile__label">Kalan yeni kelime</span></div>
     </div>
     ${ctx.streak > 0 ? `<p class="muted">🔥 ${ctx.streak} günlük seri</p>` : ""}
-    <div class="btn-row">${action}</div>
+    <div class="btn-row">${action}${reviewOnlyBtn}</div>
   `;
 }
 
@@ -127,7 +130,8 @@ async function renderDashboard() {
 
 async function renderStudy() {
   pendingAlmost = null;
-  const item = await getItemContext(todayStr());
+  const mode = (location.hash || "").includes("/study/review") ? "review" : "daily";
+  const item = await getItemContext(todayStr(), mode);
   currentItem = item;
   root.innerHTML = studyChromeHtml(item) + itemBodyHtml(item);
 }
@@ -156,13 +160,16 @@ function studyChromeHtml(item) {
 
 function itemBodyHtml(item) {
   if (item.kind === "done") {
-    const message = item.canStartNewSet
-      ? "Bu set tamamlandı! 🎉"
-      : "Öğrenilecek yeni bir şey kalmadı. 🎉";
+    const message = item.reviewOnly
+      ? "Tekrar tamamlandı! 🎉"
+      : item.canStartNewSet
+        ? "Bu set tamamlandı! 🎉"
+        : "Öğrenilecek yeni bir şey kalmadı. 🎉";
     return `<div class="card study-card">
       <p>${message}</p>
       <div class="btn-row">
-        ${item.canStartNewSet ? `<button class="btn btn--primary" data-action="start-new-set">Yeni set başlat</button>` : ""}
+        ${item.reviewOnly ? `<button class="btn btn--primary" data-action="start-study" type="button">Yeni set çalış</button>` : ""}
+        ${!item.reviewOnly && item.canStartNewSet ? `<button class="btn btn--primary" data-action="start-new-set">Yeni set başlat</button>` : ""}
         <a class="btn btn--secondary" href="#/dashboard">Panele dön</a>
       </div>
     </div>`;
