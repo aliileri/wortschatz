@@ -91,10 +91,9 @@ await reset();
   assert.strictEqual(queue.dueReviews.length, 2);
 }
 
-// --- review-only includes cards created by today's triage ---
-// With setId === null there is no set-scoped triage tracking, so the fresh
-// box-1 card lands in dueReviews (it is due today, and review-only has no
-// triage sessions to defer it for) - it still gets practiced.
+// --- review-only does not resurface a word triaged the same day ---
+// A card created by triage is due the next workday, so review-only on the
+// triage day has nothing for it; the day after, it shows up.
 await reset();
 {
   await saveSettings({ daily_new_words: 10, triage_cap: 40 });
@@ -102,10 +101,12 @@ await reset();
   const uw = await makeUserWord(w);
   await planner.applyTriage(uw, "unknown", MONDAY, SET);
 
-  const queue = await planner.buildDailyQueue(MONDAY, null, true);
-  assert.strictEqual(queue.dueReviews.length, 1);
-  assert.strictEqual(queue.deferredReviews.length, 0);
-  assert.strictEqual(queue.dueReviews[0].wordId, uw.wordId);
+  const sameDay = await planner.buildDailyQueue(MONDAY, null, true);
+  assert.strictEqual(sameDay.dueReviews.length, 0);
+
+  const nextDay = await planner.buildDailyQueue(addWorkdays(MONDAY, 1), null, true);
+  assert.strictEqual(nextDay.dueReviews.length, 1);
+  assert.strictEqual(nextDay.dueReviews[0].wordId, uw.wordId);
 }
 
 // --- review-only done does not mark the daily plan complete ---

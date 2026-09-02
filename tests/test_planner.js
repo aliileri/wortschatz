@@ -211,7 +211,8 @@ await reset();
   assert.deepStrictEqual(queue.dueReviews, []);
 }
 
-// --- card created by this set's triage is deferred, not shown immediately ---
+// --- card created by this set's triage is not shown again this session;
+//     its first review lands on the next workday ---
 await reset();
 {
   await saveSettings({ daily_new_words: 10, triage_cap: 40 });
@@ -220,13 +221,16 @@ await reset();
   const w2 = await makeWord({ source_id: 2 });
   const otherNewWord = await makeUserWord(w2);
 
-  await planner.applyTriage(triagedWord, "unknown", MONDAY, SET);
+  const card = await planner.applyTriage(triagedWord, "unknown", MONDAY, SET);
+  assert.strictEqual(card.due_on, addWorkdays(MONDAY, 1));
 
-  const queue = await planner.buildDailyQueue(MONDAY, SET);
-  assert.deepStrictEqual(queue.dueReviews, []);
-  assert.strictEqual(queue.deferredReviews.length, 1);
-  assert.strictEqual(queue.deferredReviews[0].wordId, triagedWord.wordId);
-  assert.deepStrictEqual(queue.triageCandidates.map((c) => c.userWord.wordId), [otherNewWord.wordId]);
+  const today = await planner.buildDailyQueue(MONDAY, SET);
+  assert.deepStrictEqual(today.dueReviews, []);
+  assert.deepStrictEqual(today.triageCandidates.map((c) => c.userWord.wordId), [otherNewWord.wordId]);
+
+  const tomorrow = await planner.buildDailyQueue(addWorkdays(MONDAY, 1), SET);
+  assert.strictEqual(tomorrow.dueReviews.length, 1);
+  assert.strictEqual(tomorrow.dueReviews[0].wordId, triagedWord.wordId);
 }
 
 // --- weekend behaves exactly like a workday (weekend gating was removed) ---

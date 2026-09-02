@@ -89,11 +89,6 @@ async function triagedInSetWordIds(setId) {
   return new Set(logs.filter((l) => l.question_type === "triage").map((l) => l.wordId));
 }
 
-async function triagedInSetCardIds(setId) {
-  const logs = await logsInSet(setId);
-  return new Set(logs.filter((l) => l.question_type === "triage" && l.cardId).map((l) => l.cardId));
-}
-
 async function unknownTriagedInSetCount(setId) {
   const logs = await logsInSet(setId);
   return logs.filter((l) => l.result === "triage_unknown").length;
@@ -178,22 +173,21 @@ export async function buildDailyQueue(todayStr = todayFn(), setId = null, review
 
   const answeredInSet = await answeredInSetCardIds(setId);
   const remainingReviewCap = setId === null ? Infinity : Math.max(settings.review_cap - answeredInSet.size, 0);
-  const freshFromTriage = await triagedInSetCardIds(setId);
 
   const allDueRaw = await dueReviewsQueryset(todayStr);
   const allDue = allDueRaw.filter((c) => !answeredInSet.has(c.cardId));
-  const carriedOver = allDue.filter((c) => !freshFromTriage.has(c.cardId));
-  const justTriaged = allDue.filter((c) => freshFromTriage.has(c.cardId));
 
-  const dueReviews = carriedOver.slice(0, remainingReviewCap);
-  const remainingAfterCarried = Math.max(remainingReviewCap - dueReviews.length, 0);
-  const deferredReviews = justTriaged.slice(0, remainingAfterCarried);
+  // A card just created by triage is scheduled for the next workday (see
+  // applyTriage), so it is never in `allDue` on the day it was triaged - the
+  // word is shown exactly once that session, in triage itself.
+  const dueReviews = allDue.slice(0, remainingReviewCap);
+
   if (reviewOnly) {
     // Review-only mode: an explicit user choice to practice due cards without
-    // recheck, triage, orthe backlog brake. The review_cap is still respected
+    // recheck, triage, or the backlog brake. The review_cap is still respected
     // and a null setId means "no quota" (unscoped peek/fallback).
     return {
-      dueReviews, recheckWords: [], triageCandidates: [], deferredReviews,
+      dueReviews, recheckWords: [], triageCandidates: [],
       backlogCount, backlogBlocked,
     };
   }
@@ -202,7 +196,7 @@ export async function buildDailyQueue(todayStr = todayFn(), setId = null, review
   const triageCandidates = backlogBlocked ? [] : await pullNextTriageBatch(setId);
 
   return {
-    dueReviews, recheckWords, triageCandidates, deferredReviews,
+    dueReviews, recheckWords, triageCandidates,
     backlogCount, backlogBlocked,
   };
 }
@@ -267,7 +261,9 @@ export async function applyTriage(userWord, choice, todayStr = todayFn(), setId 
       wordId: userWord.wordId,
       direction: "de_tr",
       box: resolved.startingBox,
-      due_on: todayStr,
+      // First review lands on the next workday, not this session - a word
+      // triaged as unknown is shown once (in triage) and no more that day.
+      due_on: addWorkdays(todayStr, 1),
       streak: 0,
       lapses: 0,
       is_active: true,
@@ -363,8 +359,7 @@ export async function maybeCompleteDailyPlan(todayStr, queue) {
   const nothingLeft =
     queue.dueReviews.length === 0 &&
     queue.recheckWords.length === 0 &&
-    queue.triageCandidates.length === 0 &&
-    queue.deferredReviews.length === 0;
+    queue.triageCandidates.length === 0;
   if (!plan.completed_at && nothingLeft) {
     plan.completed_at = nowIso();
     await put("dailyPlans", plan);

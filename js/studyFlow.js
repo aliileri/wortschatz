@@ -17,7 +17,6 @@ function nextItem(queue) {
     const c = queue.triageCandidates[0];
     return { kind: "triage", userWord: c.userWord, word: c.word };
   }
-  if (queue.deferredReviews.length) return { kind: "review", card: queue.deferredReviews[0] };
   return { kind: "done", backlogBlocked: queue.backlogBlocked };
 }
 
@@ -25,8 +24,7 @@ function queueHasAnything(queue) {
   return Boolean(
     queue.dueReviews.length ||
       queue.recheckWords.length ||
-      queue.triageCandidates.length ||
-      queue.deferredReviews.length
+      queue.triageCandidates.length
   );
 }
 
@@ -40,8 +38,8 @@ async function freshSetWouldHaveAnything(todayStr) {
  *
  * @param {string} todayStr - real calendar date.
  * @param {"daily"|"review"} mode - "daily" is the normal triage+review set
- *   flow; "review" is review-only mode: only due/deferred review cards,
- *   no recheck/triage, and nothing (set or plan) is marked complete..
+ *   flow; "review" is review-only mode: only due review cards, no
+ *   recheck/triage, and nothing (set or plan) is marked complete.
  */
 export async function getItemContext(todayStr, mode = "daily") {
   const reviewOnly = mode === "review";
@@ -78,7 +76,7 @@ export async function getItemContext(todayStr, mode = "daily") {
     ? await planner.answeredInSetCount(null)
     : (await planner.answeredInSetCount(setId)) + (await planner.triagedInSetCount(setId));
   const remaining =
-    queue.dueReviews.length + queue.recheckWords.length + queue.triageCandidates.length + queue.deferredReviews.length;
+    queue.dueReviews.length + queue.recheckWords.length + queue.triageCandidates.length;
   item.progressDone = done;
   item.progressTotal = done + remaining;
   item.sessionStats = await stats.currentSetStats(reviewOnly ? null : setId);
@@ -118,7 +116,7 @@ export async function dashboardContext(todayStr) {
   const remainingNewWords = Math.max(settings.daily_new_words - unknownToday, 0);
 
   return {
-    pendingReviews: queue.dueReviews.length + queue.deferredReviews.length,
+    pendingReviews: queue.dueReviews.length,
     doneToday,
     remainingNewWords,
     streak: await planner.currentStreak(todayStr),

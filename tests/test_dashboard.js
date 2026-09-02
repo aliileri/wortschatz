@@ -38,7 +38,7 @@ await reset();
 
   const setId = await getCurrentSetId();
   // exhaust triage_cap with one "known" answer (doesn't spawn a review card,
-  // so deferredReviews/dueReviews stay empty too - a clean "done" state)
+  // so dueReviews stays empty too - a clean "done" state)
   const uw0 = await get("userWords", "w0");
   await planner.applyTriage(uw0, "known", MONDAY, setId);
 
