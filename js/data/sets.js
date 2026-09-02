@@ -23,3 +23,22 @@ export async function startNewSet() {
   await put("meta", record);
   return record.id;
 }
+
+// Words dismissed as "already known" during triage are deleted outright (no
+// log), so the count of them per set is tracked here - it still feeds the
+// triage_cap brake and the "new / known" session counter.
+function clearedKey(setId) {
+  return `knownCleared::${setId}`;
+}
+
+export async function incrementKnownCleared(setId) {
+  if (!setId) return;
+  const rec = await get("meta", clearedKey(setId));
+  await put("meta", { key: clearedKey(setId), count: (rec ? rec.count : 0) + 1 });
+}
+
+export async function getKnownCleared(setId) {
+  if (!setId) return 0;
+  const rec = await get("meta", clearedKey(setId));
+  return rec ? rec.count : 0;
+}

@@ -109,17 +109,14 @@ export async function dashboardContext(todayStr) {
     }
   }
 
-  const unknownToday = await planner.unknownTriagedInSetCountPublic(setId);
-  const doneToday = (await planner.answeredInSetCount(setId)) + (await planner.triagedInSetCount(setId));
-  const { loadSettings } = await import("./data/settings.js");
-  const settings = await loadSettings();
-  const remainingNewWords = Math.max(settings.daily_new_words - unknownToday, 0);
+  const boxDist = await stats.boxDistribution();
+  const mastered = await stats.masteredWords();
 
   return {
     pendingReviews: queue.dueReviews.length,
-    doneToday,
-    remainingNewWords,
-    streak: await planner.currentStreak(todayStr),
+    boxDist,
+    boxTotal: Object.values(boxDist).reduce((a, b) => a + b, 0),
+    masteredWords: mastered,
     backlogBlocked: queue.backlogBlocked,
     backlogCount: queue.backlogCount,
     hasAnythingToDo: queueHasAnything(queue),

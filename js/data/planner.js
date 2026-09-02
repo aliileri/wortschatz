@@ -8,8 +8,9 @@
 // resets the counters. Card due-dates (Leitner box scheduling) still run on
 // real elapsed time, unaffected by this - that's what makes spaced
 // repetition actually work, and changing it was explicitly ruled out.
-import { get, put, getAll, getAllByIndex } from "./db.js";
+import { get, put, remove, getAll, getAllByIndex } from "./db.js";
 import { loadSettings } from "./settings.js";
+import { incrementKnownCleared, getKnownCleared } from "./sets.js";
 import { today as todayFn, nowIso } from "./clock.js";
 import { applyAnswer as leitnerApplyAnswer } from "../logic/leitner.js";
 import { shouldUnlockTrDe, isMastered } from "../logic/direction.js";
@@ -128,7 +129,8 @@ export async function pullNextTriageBatch(setId) {
   const settings = await loadSettings();
   const unknownSoFar = await unknownTriagedInSetCount(setId);
   const triagedWordIds = await triagedInSetWordIds(setId);
-  const triagedSoFar = triagedWordIds.size;
+  const knownCleared = await getKnownCleared(setId);
+  const triagedSoFar = triagedWordIds.size + knownCleared;
 
   const remainingUnknownQuota = settings.daily_new_words - unknownSoFar;
   const remainingTriageCap = settings.triage_cap - triagedSoFar;
@@ -248,10 +250,18 @@ export async function submitReviewAnswer(card, correct, questionType, todayStr =
 }
 
 export async function applyTriage(userWord, choice, todayStr = todayFn(), setId = null) {
+  if (choice === "known") {
+    // The user already knows this word - remove it entirely so it never comes
+    // back (triage, word list, stats, monthly recheck). Tallied on the set for
+    // the triage_cap brake and the session counter.
+    await remove("userWords", userWord.wordId);
+    await incrementKnownCleared(setId);
+    return null;
+  }
+
   const resolved = resolveTriageChoice(choice);
   userWord.status = resolved.status;
   userWord.triaged_at = nowIso();
-  if (choice === "known") userWord.known_confirmed_at = nowIso();
   await put("userWords", userWord);
 
   let card = null;
@@ -333,7 +343,7 @@ export async function answeredInSetCount(setId) {
 }
 
 export async function triagedInSetCount(setId) {
-  return (await triagedInSetWordIds(setId)).size;
+  return (await triagedInSetWordIds(setId)).size + (await getKnownCleared(setId));
 }
 
 export async function unknownTriagedInSetCountPublic(setId) {

@@ -114,15 +114,36 @@ async function renderDashboard() {
     ? `<button class="btn btn--primary" data-action="start-study" type="button">Çalışmaya başla</button>`
     : `<p class="muted">Öğrenilecek yeni bir şey kalmadı. 🎉</p>`;
 
+  const maxBox = Math.max(...Object.values(ctx.boxDist), 1);
+  const boxBars = [1, 2, 3, 4, 5, 6].map((b) => {
+    const count = ctx.boxDist[b] || 0;
+    const pct = Math.round((100 * count) / maxBox);
+    return `<div class="box-row">
+      <span class="box-row__label">Kutu ${b}</span>
+      <span class="box-row__bar"><span class="box-row__fill" style="width:${pct}%;"></span></span>
+      <span class="box-row__count">${count}</span>
+    </div>`;
+  }).join("");
+
+  const masteredList = ctx.masteredWords.length
+    ? `<ul class="mastered-list">${ctx.masteredWords.map((w) => `<li>${esc(w.anzeige)} <span class="muted">— ${esc(w.tr)}</span></li>`).join("")}</ul>`
+    : `<p class="muted">Henüz yok. Bir kelime her iki yönde de kutu 6'yı geçince buraya gelir.</p>`;
+
   root.innerHTML = `
     ${banners.join("")}
+    <div class="btn-row">${action}${reviewOnlyBtn}</div>
+
     <div class="stat-row">
       <div class="stat-tile"><span class="stat-tile__value">${ctx.pendingReviews}</span><span class="stat-tile__label">Bekleyen tekrar</span></div>
-      <div class="stat-tile"><span class="stat-tile__value">${ctx.doneToday}</span><span class="stat-tile__label">Bu sette yapılan</span></div>
-      <div class="stat-tile"><span class="stat-tile__value">${ctx.remainingNewWords}</span><span class="stat-tile__label">Kalan yeni kelime</span></div>
+      <div class="stat-tile"><span class="stat-tile__value">${ctx.boxTotal}</span><span class="stat-tile__label">Öğrenilen kart</span></div>
+      <div class="stat-tile"><span class="stat-tile__value">${ctx.masteredWords.length}</span><span class="stat-tile__label">Tam öğrenilen</span></div>
     </div>
-    ${ctx.streak > 0 ? `<p class="muted">🔥 ${ctx.streak} günlük seri</p>` : ""}
-    <div class="btn-row">${action}${reviewOnlyBtn}</div>
+
+    <h2 class="section-title">Kutulardaki kelimeler</h2>
+    <div class="card">${boxBars}</div>
+
+    <h2 class="section-title">Tam öğrenilen kelimeler (${ctx.masteredWords.length})</h2>
+    <div class="card">${masteredList}</div>
   `;
 }
 
@@ -195,6 +216,7 @@ function triageItemHtml(item) {
       <summary class="btn btn--secondary" data-shortcut="space">Anlamı göster</summary>
       <div class="study-card__meaning">${esc(w.tr)}</div>
       ${w.beispiel ? `<div class="study-card__example">${esc(w.beispiel)}</div>` : ""}
+      ${w.beispiel_tr ? `<div class="study-card__example-tr">${esc(w.beispiel_tr)}</div>` : ""}
       <div class="btn-row" style="margin-top:16px;">
         <button class="btn btn--primary" data-action="triage" data-choice="known" data-word-id="${esc(w.id)}" data-shortcut="1">Biliyordum</button>
         <button class="btn" data-action="triage" data-choice="unknown" data-word-id="${esc(w.id)}" data-shortcut="2">Bilmiyordum</button>
@@ -233,6 +255,7 @@ function reviewMeaningHtml(item) {
       <summary class="btn btn--secondary" data-shortcut="space">Anlamı göster</summary>
       <div class="study-card__meaning">${esc(meaning)}</div>
       ${word.beispiel ? `<div class="study-card__example">${esc(word.beispiel)}</div>` : ""}
+      ${word.beispiel_tr ? `<div class="study-card__example-tr">${esc(word.beispiel_tr)}</div>` : ""}
       <div class="btn-row btn-row--inline" style="margin-top:16px;">
         <button class="btn btn--primary" data-action="review-meaning" data-choice="knew" data-shortcut="1">Bildim</button>
         <button class="btn" data-action="review-meaning" data-choice="did_not_know" data-shortcut="2">Bilemedim</button>

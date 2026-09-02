@@ -1,6 +1,7 @@
 // Read-only aggregates for the statistics screen and per-word history.
 import { getAll, getAllByIndex } from "./db.js";
 import { today as todayFn } from "./clock.js";
+import { getKnownCleared } from "./sets.js";
 
 const REVIEW_QUESTION_TYPES = ["meaning", "production", "cloze"];
 const STATUS_VALUES = ["new", "known", "learning", "mastered"];
@@ -54,7 +55,7 @@ export async function dailyAnswerCounts(days = 30, todayStr = todayFn()) {
 
 export async function currentSetStats(setId) {
   const logs = setId === null ? [] : await getAllByIndex("reviewLogs", "setId", setId);
-  const newKnown = logs.filter((l) => l.result === "triage_known").length;
+  const newKnown = setId === null ? 0 : await getKnownCleared(setId); // known words are deleted, not logged
   const newUnknown = logs.filter((l) => l.result === "triage_unknown").length;
   const reviewLogs = logs.filter((l) => REVIEW_QUESTION_TYPES.includes(l.question_type));
   const reviewKnown = reviewLogs.filter((l) => l.result === "correct").length;
@@ -68,6 +69,16 @@ export async function currentSetStats(setId) {
     reviewUnknown,
     shownTotal: newKnown + newUnknown + reviewKnown + reviewUnknown,
   };
+}
+
+export async function masteredWords() {
+  const userWords = await getAll("userWords");
+  const masteredIds = new Set(userWords.filter((u) => u.status === "mastered").map((u) => u.wordId));
+  if (masteredIds.size === 0) return [];
+  const words = await getAll("words");
+  return words
+    .filter((w) => masteredIds.has(w.id))
+    .sort((a, b) => (a.thema || "").localeCompare(b.thema || "") || (a.source_id || 0) - (b.source_id || 0));
 }
 
 export async function reviewForecast(days = 14, todayStr = todayFn()) {

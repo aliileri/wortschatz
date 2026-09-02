@@ -9,7 +9,8 @@ import { get, put } from "./db.js";
 // JSON field name -> stored field name (mirrors vocab.management.commands.import_wortschatz).
 const COPIED_FIELDS = {
   quelle: "quelle", thema: "thema", anzeige: "anzeige", artikel: "artikel",
-  plural: "plural", wortart: "wortart", tr: "tr", beispiel: "beispiel", niveau: "niveau",
+  plural: "plural", wortart: "wortart", tr: "tr", beispiel: "beispiel",
+  beispiel_tr: "beispiel_tr", niveau: "niveau",
 };
 
 function naturalKey(wort, rektion) {
