@@ -90,6 +90,11 @@ async function triagedInSetWordIds(setId) {
   return new Set(logs.filter((l) => l.question_type === "triage").map((l) => l.wordId));
 }
 
+async function triagedInSetCardIds(setId) {
+  const logs = await logsInSet(setId);
+  return new Set(logs.filter((l) => l.question_type === "triage" && l.cardId).map((l) => l.cardId));
+}
+
 async function unknownTriagedInSetCount(setId) {
   const logs = await logsInSet(setId);
   return logs.filter((l) => l.result === "triage_unknown").length;
@@ -174,14 +179,15 @@ export async function buildDailyQueue(todayStr = todayFn(), setId = null, review
   const backlogBlocked = setId !== null && backlogCount > settings.backlog_threshold;
 
   const answeredInSet = await answeredInSetCardIds(setId);
+  const triagedThisSet = await triagedInSetCardIds(setId);
   const remainingReviewCap = setId === null ? Infinity : Math.max(settings.review_cap - answeredInSet.size, 0);
 
   const allDueRaw = await dueReviewsQueryset(todayStr);
-  const allDue = allDueRaw.filter((c) => !answeredInSet.has(c.cardId));
+  // A card triaged in THIS set is due immediately (box 1) but must not be
+  // re-quizzed in the same set - the word was just shown in triage. It becomes
+  // a normal due review in the next set.
+  const allDue = allDueRaw.filter((c) => !answeredInSet.has(c.cardId) && !triagedThisSet.has(c.cardId));
 
-  // A card just created by triage is scheduled for the next workday (see
-  // applyTriage), so it is never in `allDue` on the day it was triaged - the
-  // word is shown exactly once that session, in triage itself.
   const dueReviews = allDue.slice(0, remainingReviewCap);
 
   if (reviewOnly) {
@@ -271,9 +277,9 @@ export async function applyTriage(userWord, choice, todayStr = todayFn(), setId 
       wordId: userWord.wordId,
       direction: "de_tr",
       box: resolved.startingBox,
-      // First review lands on the next workday, not this session - a word
-      // triaged as unknown is shown once (in triage) and no more that day.
-      due_on: addWorkdays(todayStr, 1),
+      // Due immediately. Excluded from the current set (see buildDailyQueue),
+      // so its first review lands in the next set - no "wait until tomorrow".
+      due_on: todayStr,
       streak: 0,
       lapses: 0,
       is_active: true,

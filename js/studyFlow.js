@@ -43,8 +43,12 @@ async function freshSetWouldHaveAnything(todayStr) {
  */
 export async function getItemContext(todayStr, mode = "daily") {
   const reviewOnly = mode === "review";
-  const setId = reviewOnly ? null : await getCurrentSetId();
-  const queue = await planner.buildDailyQueue(todayStr, setId, reviewOnly);
+  const currentSetId = await getCurrentSetId();
+  // Review-only answers are practice - logged with a null setId so they don't
+  // count toward any set's quota. `currentSetId` is still passed to the queue
+  // builder so words triaged this session stay out of the review list.
+  const setId = reviewOnly ? null : currentSetId;
+  const queue = await planner.buildDailyQueue(todayStr, currentSetId, reviewOnly);
   const item = await nextItem(queue);
 
   if (item.kind === "done") {

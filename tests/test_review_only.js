@@ -91,9 +91,8 @@ await reset();
   assert.strictEqual(queue.dueReviews.length, 2);
 }
 
-// --- review-only does not resurface a word triaged the same day ---
-// A card created by triage is due the next workday, so review-only on the
-// triage day has nothing for it; the day after, it shows up.
+// --- review-only does not resurface a word triaged in the current set,
+//     but a later set (review-only or not) does ---
 await reset();
 {
   await saveSettings({ daily_new_words: 10, triage_cap: 40 });
@@ -101,12 +100,12 @@ await reset();
   const uw = await makeUserWord(w);
   await planner.applyTriage(uw, "unknown", MONDAY, SET);
 
-  const sameDay = await planner.buildDailyQueue(MONDAY, null, true);
-  assert.strictEqual(sameDay.dueReviews.length, 0);
+  const sameSet = await planner.buildDailyQueue(MONDAY, SET, true);
+  assert.strictEqual(sameSet.dueReviews.length, 0);
 
-  const nextDay = await planner.buildDailyQueue(addWorkdays(MONDAY, 1), null, true);
-  assert.strictEqual(nextDay.dueReviews.length, 1);
-  assert.strictEqual(nextDay.dueReviews[0].wordId, uw.wordId);
+  const nextSet = await planner.buildDailyQueue(MONDAY, "set-2", true);
+  assert.strictEqual(nextSet.dueReviews.length, 1);
+  assert.strictEqual(nextSet.dueReviews[0].wordId, uw.wordId);
 }
 
 // --- review-only done does not mark the daily plan complete ---

@@ -55,6 +55,12 @@ async function wipeAndReseed(data) {
 }
 
 async function bootstrap() {
+  // Ask the browser not to auto-evict our IndexedDB under storage pressure.
+  // Best-effort: granted silently on installed / home-screen apps.
+  if (navigator.storage && navigator.storage.persist) {
+    navigator.storage.persist().catch(() => {});
+  }
+
   await openDB();
   const data = await fetch("data/words.json", { cache: "no-store" }).then((r) => r.json());
   const meta = await get("meta", "dataset");

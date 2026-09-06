@@ -211,8 +211,8 @@ await reset();
   assert.deepStrictEqual(queue.dueReviews, []);
 }
 
-// --- card created by this set's triage is not shown again this session;
-//     its first review lands on the next workday ---
+// --- a word triaged in a set is due immediately, but only surfaces as a
+//     review in the NEXT set (never re-quizzed in the same set) ---
 await reset();
 {
   await saveSettings({ daily_new_words: 10, triage_cap: 40 });
@@ -222,15 +222,15 @@ await reset();
   const otherNewWord = await makeUserWord(w2);
 
   const card = await planner.applyTriage(triagedWord, "unknown", MONDAY, SET);
-  assert.strictEqual(card.due_on, addWorkdays(MONDAY, 1));
+  assert.strictEqual(card.due_on, MONDAY); // due now, no "wait until tomorrow"
 
-  const today = await planner.buildDailyQueue(MONDAY, SET);
-  assert.deepStrictEqual(today.dueReviews, []);
-  assert.deepStrictEqual(today.triageCandidates.map((c) => c.userWord.wordId), [otherNewWord.wordId]);
+  const sameSet = await planner.buildDailyQueue(MONDAY, SET);
+  assert.deepStrictEqual(sameSet.dueReviews, []); // not re-quizzed this set
+  assert.deepStrictEqual(sameSet.triageCandidates.map((c) => c.userWord.wordId), [otherNewWord.wordId]);
 
-  const tomorrow = await planner.buildDailyQueue(addWorkdays(MONDAY, 1), SET);
-  assert.strictEqual(tomorrow.dueReviews.length, 1);
-  assert.strictEqual(tomorrow.dueReviews[0].wordId, triagedWord.wordId);
+  const nextSet = await planner.buildDailyQueue(MONDAY, "set-2");
+  assert.strictEqual(nextSet.dueReviews.length, 1);
+  assert.strictEqual(nextSet.dueReviews[0].wordId, triagedWord.wordId);
 }
 
 // --- weekend behaves exactly like a workday (weekend gating was removed) ---
