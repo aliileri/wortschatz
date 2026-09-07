@@ -43,12 +43,11 @@ async function freshSetWouldHaveAnything(todayStr) {
  */
 export async function getItemContext(todayStr, mode = "daily") {
   const reviewOnly = mode === "review";
-  const currentSetId = await getCurrentSetId();
-  // Review-only answers are practice - logged with a null setId so they don't
-  // count toward any set's quota. `currentSetId` is still passed to the queue
-  // builder so words triaged this session stay out of the review list.
-  const setId = reviewOnly ? null : currentSetId;
-  const queue = await planner.buildDailyQueue(todayStr, currentSetId, reviewOnly);
+  // Review-only is just a set that adds no new words: answers are logged with
+  // the current set id like any other, so an answered card drops out of the
+  // queue instead of coming straight back.
+  const setId = await getCurrentSetId();
+  const queue = await planner.buildDailyQueue(todayStr, setId, reviewOnly);
   const item = await nextItem(queue);
 
   if (item.kind === "done") {
@@ -76,14 +75,14 @@ export async function getItemContext(todayStr, mode = "daily") {
     item.wordStats = await stats.wordHistory(item.userWord.wordId);
   }
 
-  const done = reviewOnly
-    ? await planner.answeredInSetCount(null)
-    : (await planner.answeredInSetCount(setId)) + (await planner.triagedInSetCount(setId));
+  const done =
+    (await planner.answeredInSetCount(setId)) +
+    (reviewOnly ? 0 : await planner.triagedInSetCount(setId));
   const remaining =
     queue.dueReviews.length + queue.recheckWords.length + queue.triageCandidates.length;
   item.progressDone = done;
   item.progressTotal = done + remaining;
-  item.sessionStats = await stats.currentSetStats(reviewOnly ? null : setId);
+  item.sessionStats = await stats.currentSetStats(setId);
   item.setId = setId;
   item.reviewOnly = reviewOnly;
 
