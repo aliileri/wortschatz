@@ -65,12 +65,16 @@ async function bootstrap() {
   const data = await fetch("data/words.json", { cache: "no-store" }).then((r) => r.json());
   const meta = await get("meta", "dataset");
 
-  if (!meta || meta.version !== data.version) {
-    // The bundled word list changed (e.g. a different source book) - wipe
-    // everything derived from the old pool and re-seed clean. Settings are
-    // left untouched since they're not tied to a specific dataset.
-    root.innerHTML = `<div class="spinner">Kelime verisi güncelleniyor…</div>`;
+  if (!meta) {
+    // First run - seed the whole pool.
+    root.innerHTML = `<div class="spinner">Kelime verisi yükleniyor…</div>`;
     await wipeAndReseed(data);
+  } else if (meta.version !== data.version) {
+    // Bundled list changed. Merge the updates in (new words, corrected fields,
+    // added translations) WITHOUT touching the user's progress.
+    root.innerHTML = `<div class="spinner">Kelime verisi güncelleniyor…</div>`;
+    await importWords(data);
+    await put("meta", { key: "dataset", version: data.version });
   }
 
   window.addEventListener("hashchange", render);
