@@ -187,6 +187,16 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 .btn-row { display: flex; flex-direction: column; gap: 10px; }
 .btn-row--inline { flex-direction: row; }
 
+.choice-group { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 4px; }
+.choice-option { width: auto; position: relative; }
+.choice-option input { position: absolute; opacity: 0; width: 0; height: 0; }
+.choice-option:has(input:checked) {
+  background: linear-gradient(120deg, var(--color-accent), var(--color-accent-2));
+  color: var(--color-accent-text);
+  border-color: transparent;
+  font-weight: 700;
+}
+
 .study-card {
   min-height: 46vh;
   display: flex;

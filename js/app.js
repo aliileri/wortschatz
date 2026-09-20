@@ -3,7 +3,6 @@ import { loadSettings, saveSettings } from "./data/settings.js";
 import { importWords } from "./data/importWords.js";
 import * as planner from "./data/planner.js";
 import * as stats from "./data/stats.js";
-import { compare as answerCompare } from "./logic/answerEval.js";
 import { today as todayStr } from "./data/clock.js";
 import { getItemContext, dashboardContext, beginNewSet } from "./studyFlow.js";
 import { exportBackup, importBackup } from "./data/backup.js";
@@ -12,7 +11,6 @@ const root = document.getElementById("app");
 const navEl = document.getElementById("app-nav");
 
 let currentItem = null; // the study item currently on screen (for answer handlers)
-let pendingAlmost = null; // {card, question} while the "almost correct" confirm is shown
 const QUELLE_LABELS = { kursbuch: "Kursbuch" };
 const NIVEAU_VALUES = ["A1", "A2", "B1", "B2"];
 const WORTART_VALUES = [
@@ -160,7 +158,6 @@ async function renderDashboard() {
 // ---------- study ----------
 
 async function renderStudy() {
-  pendingAlmost = null;
   const mode = (location.hash || "").includes("/study/review") ? "review" : "daily";
   const item = await getItemContext(todayStr(), mode);
   currentItem = item;
@@ -274,16 +271,22 @@ function reviewMeaningHtml(item) {
   </div>`;
 }
 
+function choiceGroupHtml(name, choices) {
+  return `<div class="choice-group">${choices
+    .map((c) => `<label class="btn choice-option"><input type="radio" name="${name}" value="${esc(c)}" required>${esc(c)}</label>`)
+    .join("")}</div>`;
+}
+
 function reviewProductionHtml(item) {
   const { card, question } = item;
   return `<div class="card study-card">
     <div class="study-card__meta"><span class="tag">Kutu ${card.box}</span><span class="tag">${directionLabel(card.direction)}</span></div>
     <div class="study-card__front">${esc(question.prompt)}</div>
-    <form class="btn-row" style="width:100%;margin-top:16px;" data-action="review-answer">
-      <input type="text" name="answer_wort" placeholder="${question.expectsArtikel ? "der/die/das kelime" : "Cevabın"}" autocomplete="off" autofocus>
-      ${question.expectsPlural ? `<input type="text" name="answer_plural" placeholder="Çoğul (örn. -en)" autocomplete="off">` : ""}
-      ${question.expectsRektion ? `<input type="text" name="answer_rektion" placeholder="Ek (örn. über + A)" autocomplete="off">` : ""}
-      <button class="btn btn--primary" type="submit">Gönder</button>
+    <form style="width:100%;margin-top:16px;" data-action="review-answer">
+      ${choiceGroupHtml("answer_wort", question.choices)}
+      ${question.pluralChoices.length ? `<p class="muted" style="margin:14px 0 6px;">Çoğul</p>${choiceGroupHtml("answer_plural", question.pluralChoices)}` : ""}
+      ${question.rektionChoices.length ? `<p class="muted" style="margin:14px 0 6px;">Ek</p>${choiceGroupHtml("answer_rektion", question.rektionChoices)}` : ""}
+      <button class="btn btn--primary" type="submit" style="margin-top:16px;">Gönder</button>
     </form>
   </div>`;
 }
@@ -293,20 +296,13 @@ function reviewClozeHtml(item) {
   return `<div class="card study-card">
     <div class="study-card__meta"><span class="tag">Kutu ${card.box}</span><span class="tag">Boşluk doldurma</span></div>
     <div class="study-card__front" style="font-size:1.2rem;">${esc(question.clozeSentence)}</div>
-    <form class="btn-row" style="width:100%;margin-top:16px;" data-action="review-answer">
-      <input type="text" name="answer_wort" placeholder="Boşluğa gelecek kelime" autocomplete="off" autofocus>
-      <button class="btn btn--primary" type="submit">Gönder</button>
-    </form>
-  </div>`;
-}
-
-function almostConfirmHtml(question) {
-  return `<div class="card study-card">
-    <p>Neredeyse doğru!</p>
-    <p class="muted">Doğru cevap: <strong>${esc(question.answerKey.wort)}</strong></p>
-    <div class="btn-row btn-row--inline">
-      <button class="btn btn--primary" data-action="confirm-almost" data-choice="correct" data-shortcut="1">Doğru saydım</button>
-      <button class="btn" data-action="confirm-almost" data-choice="wrong" data-shortcut="2">Yanlış saydım</button>
+    <div class="btn-row" style="flex-wrap:wrap;margin-top:16px;">
+      ${question.choices
+        .map(
+          (c, i) =>
+            `<button class="btn" data-action="review-choice" data-choice="${esc(c)}" data-shortcut="${i + 1}">${esc(c)}</button>`
+        )
+        .join("")}
     </div>
   </div>`;
 }
@@ -315,24 +311,11 @@ async function handleReviewAnswerSubmit(form) {
   const { card, question } = currentItem;
   const fd = new FormData(form);
 
-  let expectedWort = question.answerKey.wort;
-  if (question.expectsArtikel && question.answerKey.artikel) {
-    expectedWort = `${question.answerKey.artikel} ${expectedWort}`;
-  }
-  const verdicts = [answerCompare(expectedWort, fd.get("answer_wort") || "")];
-  if (question.expectsPlural) verdicts.push(answerCompare(question.answerKey.plural, fd.get("answer_plural") || ""));
-  if (question.expectsRektion) verdicts.push(answerCompare(question.answerKey.rektion, fd.get("answer_rektion") || ""));
+  let correct = fd.get("answer_wort") === question.correctChoice;
+  if (question.expectsPlural) correct = correct && fd.get("answer_plural") === question.correctPlural;
+  if (question.expectsRektion) correct = correct && fd.get("answer_rektion") === question.correctRektion;
 
-  let overall = "correct";
-  if (verdicts.includes("wrong")) overall = "wrong";
-  else if (verdicts.includes("almost")) overall = "almost";
-
-  if (overall === "almost") {
-    pendingAlmost = { card, question };
-    root.innerHTML = almostConfirmHtml(question);
-    return;
-  }
-  await planner.submitReviewAnswer(card, overall === "correct", question.type, todayStr(), currentItem.setId);
+  await planner.submitReviewAnswer(card, correct, question.type, todayStr(), currentItem.setId);
   return renderStudy();
 }
 
@@ -619,11 +602,12 @@ function wireGlobalHandlers() {
       await planner.submitReviewAnswer(currentItem.card, correct, "meaning", todayStr(), currentItem.setId);
       return renderStudy();
     }
-    if (action === "confirm-almost") {
+    if (action === "review-choice") {
+      // Cloze: a single tap both picks and submits the answer.
       e.preventDefault();
-      const { card, question } = pendingAlmost;
-      await planner.submitReviewAnswer(card, btn.dataset.choice === "correct", question.type, todayStr(), currentItem.setId);
-      pendingAlmost = null;
+      const { card, question } = currentItem;
+      const correct = btn.dataset.choice === question.correctChoice;
+      await planner.submitReviewAnswer(card, correct, question.type, todayStr(), currentItem.setId);
       return renderStudy();
     }
     if (action === "start-new-set") {
