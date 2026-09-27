@@ -2,7 +2,7 @@
 // the planner queue to a single "what to show next" item for the UI.
 import * as planner from "./data/planner.js";
 import * as stats from "./data/stats.js";
-import { get, getAll } from "./data/db.js";
+import { get } from "./data/db.js";
 import { getCurrentSetId, startNewSet } from "./data/sets.js";
 import { buildQuestion } from "./logic/questionTypes.js";
 
@@ -66,10 +66,7 @@ export async function getItemContext(todayStr, mode = "daily") {
   if (item.kind === "review") {
     const word = await wordFor(item.card.wordId);
     item.word = word;
-    // Choice distractors for production/cloze are drawn from the full word
-    // pool - a few hundred rows, cheap enough to fetch per question.
-    const pool = await getAll("words");
-    item.question = buildQuestion(item.card, word, pool);
+    item.question = buildQuestion(item.card, word);
     item.wordStats = await stats.wordHistory(item.card.wordId);
   } else if (item.kind === "triage") {
     item.wordStats = await stats.wordHistory(item.userWord.wordId);
@@ -117,12 +114,14 @@ export async function dashboardContext(todayStr) {
 
   const boxDist = await stats.boxDistribution();
   const mastered = await stats.masteredWords();
+  const blackBox = await stats.blackBoxWords();
 
   return {
     pendingReviews: queue.dueReviews.length,
     boxDist,
     boxTotal: Object.values(boxDist).reduce((a, b) => a + b, 0),
     masteredWords: mastered,
+    blackBoxWords: blackBox,
     backlogBlocked: queue.backlogBlocked,
     backlogCount: queue.backlogCount,
     hasAnythingToDo: queueHasAnything(queue),

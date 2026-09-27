@@ -345,4 +345,40 @@ await reset();
   assert.strictEqual(batchInSet2.length, 1); // fresh quota in a new set
 }
 
+// --- a card wrong 10 times straight becomes a black box and drops out of the queue ---
+await reset();
+{
+  const w = await makeWord();
+  let card = await makeReviewCard(w, { box: 1, due_on: MONDAY });
+
+  for (let i = 0; i < 9; i++) {
+    await planner.submitReviewAnswer(card, false, "meaning", MONDAY, SET);
+  }
+  assert.strictEqual(card.is_black_box, undefined);
+  assert.strictEqual((await planner.dueReviewsQueryset(MONDAY)).length, 1);
+
+  await planner.submitReviewAnswer(card, false, "meaning", MONDAY, SET);
+  assert.strictEqual(card.is_black_box, true);
+  assert.strictEqual(card.is_active, false);
+  assert.strictEqual((await planner.dueReviewsQueryset(MONDAY)).length, 0);
+
+  const blackBox = await planner.blackBoxCards();
+  assert.strictEqual(blackBox.length, 1);
+  assert.strictEqual(blackBox[0].cardId, card.cardId);
+}
+
+// --- a single correct answer within the streak resets the black-box count ---
+await reset();
+{
+  const w = await makeWord();
+  const card = await makeReviewCard(w, { box: 1, due_on: MONDAY });
+
+  for (let i = 0; i < 9; i++) {
+    await planner.submitReviewAnswer(card, false, "meaning", MONDAY, SET);
+  }
+  await planner.submitReviewAnswer(card, true, "meaning", MONDAY, SET); // 10th attempt, correct
+  assert.strictEqual(card.is_black_box, undefined);
+  assert.strictEqual(card.is_active, true);
+}
+
 console.log("test_planner.js: all assertions passed");

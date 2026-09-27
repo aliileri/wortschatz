@@ -10,6 +10,9 @@ export const DEFAULT_SETTINGS = {
   backlog_threshold: 100,
   sources_enabled: ["kursbuch"],
   known_recheck_per_month: 10,
+  openrouter_api_key: "",
+  openrouter_model: "",
+  paragraph_word_count: 10,
 };
 
 export async function loadSettings() {

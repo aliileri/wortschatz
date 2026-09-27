@@ -15,6 +15,7 @@ import { today as todayFn, nowIso } from "./clock.js";
 import { applyAnswer as leitnerApplyAnswer } from "../logic/leitner.js";
 import { shouldUnlockTrDe, isMastered } from "../logic/direction.js";
 import { resolveTriageChoice } from "../logic/triage.js";
+import { isBlackBox } from "../logic/blackBox.js";
 import { isWorkday, isFirstWorkdayOfMonth, addWorkdays } from "../logic/workdays.js";
 import { seededSample } from "../logic/seededRandom.js";
 
@@ -252,7 +253,26 @@ export async function submitReviewAnswer(card, correct, questionType, todayStr =
     question_type: questionType,
   };
   await put("reviewLogs", log);
+
+  const cardLogs = await getAllByIndex("reviewLogs", "cardId", card.cardId);
+  const relevant = cardLogs.filter((l) => REVIEW_QUESTION_TYPES.includes(l.question_type));
+  const shownCount = relevant.length;
+  const correctCount = relevant.filter((l) => l.result === "correct").length;
+  if (!card.is_black_box && isBlackBox(shownCount, correctCount)) {
+    card.is_black_box = true;
+    card.is_active = false;
+    await put("reviewCards", card);
+  }
+
   return log;
+}
+
+/** Cards set aside because they were shown BLACK_BOX_THRESHOLD+ times and
+ * never answered correctly once - no longer in the active review queue,
+ * awaiting a future dedicated review mode. */
+export async function blackBoxCards() {
+  const all = await getAll("reviewCards");
+  return all.filter((c) => c.is_black_box);
 }
 
 export async function applyTriage(userWord, choice, todayStr = todayFn(), setId = null) {

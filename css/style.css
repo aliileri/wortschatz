@@ -404,6 +404,8 @@ th { color: var(--color-text-muted); font-weight: 600; }
 
 .muted { color: var(--color-text-muted); font-size: 0.9rem; }
 
+.paragraph-text { line-height: 1.7; font-size: 1.05rem; }
+
 @media (min-width: 700px) {
   .study-card__front { font-size: 2.1rem; }
 }

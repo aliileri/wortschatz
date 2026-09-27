@@ -6,6 +6,7 @@ import * as stats from "./data/stats.js";
 import { today as todayStr } from "./data/clock.js";
 import { getItemContext, dashboardContext, beginNewSet } from "./studyFlow.js";
 import { exportBackup, importBackup } from "./data/backup.js";
+import { generateParagraph } from "./data/paragraphMode.js";
 
 const root = document.getElementById("app");
 const navEl = document.getElementById("app-nav");
@@ -90,6 +91,7 @@ async function render() {
     if (route === "dashboard") return renderDashboard();
     if (route === "study" || route === "study/review") return renderStudy();
     if (route === "words") return renderWordList();
+    if (route === "paragraph") return renderParagraphMode();
     if (route === "stats") return renderStats();
     if (route === "settings") return renderSettings();
     return renderDashboard();
@@ -137,6 +139,14 @@ async function renderDashboard() {
     ? `<ul class="mastered-list">${ctx.masteredWords.map((w) => `<li>${esc(w.anzeige)} <span class="muted">— ${esc(w.tr)}</span></li>`).join("")}</ul>`
     : `<p class="muted">Henüz yok. Bir kelime her iki yönde de kutu 6'yı geçince buraya gelir.</p>`;
 
+  const blackBoxSection = ctx.blackBoxWords.length
+    ? `<h2 class="section-title">Kara kutu (${ctx.blackBoxWords.length})</h2>
+    <div class="card">
+      <p class="muted">10+ kez sorulup hiç bilinmeyen kartlar. Artık tekrar kuyruğunda görünmüyorlar.</p>
+      <ul class="mastered-list">${ctx.blackBoxWords.map((r) => `<li>${esc(r.word.anzeige)} <span class="muted">— ${esc(r.word.tr)} · ${directionLabel(r.direction)}</span></li>`).join("")}</ul>
+    </div>`
+    : "";
+
   root.innerHTML = `
     ${banners.join("")}
     <div class="btn-row">${action}${reviewOnlyBtn}</div>
@@ -152,6 +162,8 @@ async function renderDashboard() {
 
     <h2 class="section-title">Tam öğrenilen kelimeler (${ctx.masteredWords.length})</h2>
     <div class="card">${masteredList}</div>
+
+    ${blackBoxSection}
   `;
 }
 
@@ -204,11 +216,7 @@ function itemBodyHtml(item) {
   }
   if (item.kind === "triage") return triageItemHtml(item);
   if (item.kind === "recheck") return recheckItemHtml(item);
-  if (item.kind === "review") {
-    if (item.question.type === "meaning") return reviewMeaningHtml(item);
-    if (item.question.type === "cloze") return reviewClozeHtml(item);
-    return reviewProductionHtml(item);
-  }
+  if (item.kind === "review") return reviewMeaningHtml(item);
   return "";
 }
 
@@ -269,54 +277,6 @@ function reviewMeaningHtml(item) {
       </div>
     </details>
   </div>`;
-}
-
-function choiceGroupHtml(name, choices) {
-  return `<div class="choice-group">${choices
-    .map((c) => `<label class="btn choice-option"><input type="radio" name="${name}" value="${esc(c)}" required>${esc(c)}</label>`)
-    .join("")}</div>`;
-}
-
-function reviewProductionHtml(item) {
-  const { card, question } = item;
-  return `<div class="card study-card">
-    <div class="study-card__meta"><span class="tag">Kutu ${card.box}</span><span class="tag">${directionLabel(card.direction)}</span></div>
-    <div class="study-card__front">${esc(question.prompt)}</div>
-    <form style="width:100%;margin-top:16px;" data-action="review-answer">
-      ${choiceGroupHtml("answer_wort", question.choices)}
-      ${question.pluralChoices.length ? `<p class="muted" style="margin:14px 0 6px;">Çoğul</p>${choiceGroupHtml("answer_plural", question.pluralChoices)}` : ""}
-      ${question.rektionChoices.length ? `<p class="muted" style="margin:14px 0 6px;">Ek</p>${choiceGroupHtml("answer_rektion", question.rektionChoices)}` : ""}
-      <button class="btn btn--primary" type="submit" style="margin-top:16px;">Gönder</button>
-    </form>
-  </div>`;
-}
-
-function reviewClozeHtml(item) {
-  const { card, question } = item;
-  return `<div class="card study-card">
-    <div class="study-card__meta"><span class="tag">Kutu ${card.box}</span><span class="tag">Boşluk doldurma</span></div>
-    <div class="study-card__front" style="font-size:1.2rem;">${esc(question.clozeSentence)}</div>
-    <div class="btn-row" style="flex-wrap:wrap;margin-top:16px;">
-      ${question.choices
-        .map(
-          (c, i) =>
-            `<button class="btn" data-action="review-choice" data-choice="${esc(c)}" data-shortcut="${i + 1}">${esc(c)}</button>`
-        )
-        .join("")}
-    </div>
-  </div>`;
-}
-
-async function handleReviewAnswerSubmit(form) {
-  const { card, question } = currentItem;
-  const fd = new FormData(form);
-
-  let correct = fd.get("answer_wort") === question.correctChoice;
-  if (question.expectsPlural) correct = correct && fd.get("answer_plural") === question.correctPlural;
-  if (question.expectsRektion) correct = correct && fd.get("answer_rektion") === question.correctRektion;
-
-  await planner.submitReviewAnswer(card, correct, question.type, todayStr(), currentItem.setId);
-  return renderStudy();
 }
 
 // ---------- word list ----------
@@ -409,6 +369,52 @@ async function handleStatusOverride(select) {
   await put("userWords", uw);
 }
 
+// ---------- paragraph mode ----------
+
+async function renderParagraphMode() {
+  const s = await loadSettings();
+  root.innerHTML = `
+    <h1 class="section-title">Paragraf Modu</h1>
+    <p class="muted">Öğrenmeye başladığın kelimelerden rastgele seçilenleri içeren, B2 seviyesinde bir Almanca paragraf üretir.</p>
+    <div class="card">
+      <div class="field">
+        <label for="paragraph-word-count">Kelime sayısı</label>
+        <input type="text" inputmode="numeric" id="paragraph-word-count" value="${s.paragraph_word_count}">
+      </div>
+      <button class="btn btn--primary" id="paragraph-generate-btn" type="button" style="margin-top:12px;">Paragraf oluştur</button>
+      <p id="paragraph-message" class="muted"></p>
+    </div>
+    <div id="paragraph-result"></div>
+  `;
+}
+
+function paragraphResultHtml({ paragraph, words }) {
+  return `
+    <h2 class="section-title">Paragraf</h2>
+    <div class="card paragraph-text">${esc(paragraph).replace(/\n+/g, "<br><br>")}</div>
+    <h2 class="section-title">Kullanılması istenen kelimeler (${words.length})</h2>
+    <div class="card"><ul class="mastered-list">${words.map((w) => `<li>${esc(w.anzeige)} <span class="muted">— ${esc(w.tr)}</span></li>`).join("")}</ul></div>
+  `;
+}
+
+async function handleGenerateParagraph() {
+  const input = document.getElementById("paragraph-word-count");
+  const msg = document.getElementById("paragraph-message");
+  const resultEl = document.getElementById("paragraph-result");
+  const wordCount = parseInt(input.value, 10) || 10;
+
+  await saveSettings({ paragraph_word_count: wordCount });
+  msg.textContent = "Paragraf oluşturuluyor…";
+  resultEl.innerHTML = "";
+  try {
+    const result = await generateParagraph(wordCount);
+    msg.textContent = "";
+    resultEl.innerHTML = paragraphResultHtml(result);
+  } catch (err) {
+    msg.textContent = err.message || "Paragraf oluşturulamadı.";
+  }
+}
+
 // ---------- statistics ----------
 
 function barRow(label, count, max) {
@@ -470,6 +476,16 @@ async function renderSettings() {
       </div>
     </form>
 
+    <h2 class="section-title">Paragraf Modu (OpenRouter)</h2>
+    <form id="openrouter-form" class="card">
+      <div class="btn-row">
+        <div class="field"><label>OpenRouter API anahtarı</label><input type="password" name="openrouter_api_key" value="${esc(s.openrouter_api_key)}" autocomplete="off"></div>
+        <div class="field"><label>Model (ör. anthropic/claude-sonnet-4.5)</label><input type="text" name="openrouter_model" value="${esc(s.openrouter_model)}" placeholder="anthropic/claude-sonnet-4.5"></div>
+        <button class="btn btn--primary" type="submit">Kaydet</button>
+        <p id="openrouter-message" class="muted"></p>
+      </div>
+    </form>
+
     <h2 class="section-title">Veri</h2>
     <div class="card">
       <p class="muted">Uygulamayla birlikte gelen kelime listesini yeniden okur (mevcut ilerlemeni bozmaz).</p>
@@ -516,6 +532,16 @@ async function handleSettingsSubmit(form) {
   });
   const msg = document.getElementById("settings-message");
   if (msg) msg.textContent = "Ayarlar kaydedildi.";
+}
+
+async function handleOpenRouterSubmit(form) {
+  const fd = new FormData(form);
+  await saveSettings({
+    openrouter_api_key: (fd.get("openrouter_api_key") || "").trim(),
+    openrouter_model: (fd.get("openrouter_model") || "").trim(),
+  });
+  const msg = document.getElementById("openrouter-message");
+  if (msg) msg.textContent = "Kaydedildi.";
 }
 
 async function handleReimport() {
@@ -602,14 +628,6 @@ function wireGlobalHandlers() {
       await planner.submitReviewAnswer(currentItem.card, correct, "meaning", todayStr(), currentItem.setId);
       return renderStudy();
     }
-    if (action === "review-choice") {
-      // Cloze: a single tap both picks and submits the answer.
-      e.preventDefault();
-      const { card, question } = currentItem;
-      const correct = btn.dataset.choice === question.correctChoice;
-      await planner.submitReviewAnswer(card, correct, question.type, todayStr(), currentItem.setId);
-      return renderStudy();
-    }
     if (action === "start-new-set") {
       e.preventDefault();
       await beginNewSet();
@@ -623,16 +641,17 @@ function wireGlobalHandlers() {
     if (btn.id === "reimport-btn") return handleReimport();
     if (btn.id === "reset-progress-btn") return handleResetProgress();
     if (btn.id === "export-btn") return handleExport();
+    if (btn.id === "paragraph-generate-btn") return handleGenerateParagraph();
   });
 
   root.addEventListener("submit", async (e) => {
-    if (e.target.dataset && e.target.dataset.action === "review-answer") {
-      e.preventDefault();
-      return handleReviewAnswerSubmit(e.target);
-    }
     if (e.target.id === "settings-form") {
       e.preventDefault();
       return handleSettingsSubmit(e.target);
+    }
+    if (e.target.id === "openrouter-form") {
+      e.preventDefault();
+      return handleOpenRouterSubmit(e.target);
     }
   });
 

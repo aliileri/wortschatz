@@ -81,6 +81,17 @@ export async function masteredWords() {
     .sort((a, b) => (a.thema || "").localeCompare(b.thema || "") || (a.source_id || 0) - (b.source_id || 0));
 }
 
+export async function blackBoxWords() {
+  const cards = (await getAll("reviewCards")).filter((c) => c.is_black_box);
+  if (!cards.length) return [];
+  const words = await getAll("words");
+  const wordsById = new Map(words.map((w) => [w.id, w]));
+  return cards
+    .map((c) => ({ word: wordsById.get(c.wordId), direction: c.direction }))
+    .filter((r) => r.word)
+    .sort((a, b) => (a.word.thema || "").localeCompare(b.word.thema || "") || (a.word.source_id || 0) - (b.word.source_id || 0));
+}
+
 export async function reviewForecast(days = 14, todayStr = todayFn()) {
   const cards = (await getAll("reviewCards")).filter((c) => c.is_active);
   const end = addDaysStr(todayStr, days);
