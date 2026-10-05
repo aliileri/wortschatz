@@ -7,6 +7,8 @@ import { loadSettings } from "./settings.js";
 import { pickRandomWords, buildParagraphPrompt } from "../logic/paragraphPrompt.js";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+// Used whenever no model is set in Settings, so only the key ever has to be entered.
+export const DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash";
 
 /** Words that have entered the box system in either direction ("kutu 1'den
  * itibaren") - excludes untriaged "new" and never-boxed "known" words. */
@@ -43,8 +45,8 @@ async function callOpenRouter(prompt, apiKey, model) {
 /** @returns {Promise<{paragraph: string, words: object[]}>} */
 export async function generateParagraph(wordCount) {
   const settings = await loadSettings();
-  if (!settings.openrouter_api_key) throw new Error("Önce Ayarlar'dan OpenRouter API anahtarını gir.");
-  if (!settings.openrouter_model) throw new Error("Önce Ayarlar'dan bir OpenRouter modeli seç.");
+  if (!settings.openrouter_api_key) throw new Error("Önce OpenRouter API anahtarını gir.");
+  const model = settings.openrouter_model || DEFAULT_MODEL;
 
   const pool = await eligibleParagraphWords();
   if (pool.length < wordCount) {
@@ -53,6 +55,6 @@ export async function generateParagraph(wordCount) {
 
   const words = pickRandomWords(pool, wordCount);
   const prompt = buildParagraphPrompt(words, wordCount);
-  const paragraph = await callOpenRouter(prompt, settings.openrouter_api_key, settings.openrouter_model);
+  const paragraph = await callOpenRouter(prompt, settings.openrouter_api_key, model);
   return { paragraph, words };
 }

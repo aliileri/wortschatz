@@ -377,6 +377,14 @@ async function renderParagraphMode() {
   root.innerHTML = `
     <h1 class="section-title">Paragraf Modu</h1>
     <p class="muted">Öğrenmeye başladığın kelimelerden rastgele seçilenleri içeren, B2 seviyesinde bir Almanca paragraf üretir.</p>
+    ${s.openrouter_api_key ? "" : `
+    <form id="paragraph-key-form" class="card">
+      <div class="field">
+        <label for="paragraph-api-key">OpenRouter API anahtarı (bir kez gir, telefonda saklanır)</label>
+        <input type="password" id="paragraph-api-key" name="openrouter_api_key" autocomplete="off" placeholder="sk-or-...">
+      </div>
+      <button class="btn btn--primary" type="submit" style="margin-top:12px;">Kaydet</button>
+    </form>`}
     <div class="card">
       <div class="field">
         <label for="paragraph-word-count">Kelime sayısı</label>
@@ -481,7 +489,7 @@ async function renderSettings() {
     <form id="openrouter-form" class="card">
       <div class="btn-row">
         <div class="field"><label>OpenRouter API anahtarı</label><input type="password" name="openrouter_api_key" value="${esc(s.openrouter_api_key)}" autocomplete="off"></div>
-        <div class="field"><label>Model (ör. anthropic/claude-sonnet-4.5)</label><input type="text" name="openrouter_model" value="${esc(s.openrouter_model)}" placeholder="anthropic/claude-sonnet-4.5"></div>
+        <div class="field"><label>Model (boş bırakırsan: deepseek/deepseek-v4.1-flash)</label><input type="text" name="openrouter_model" value="${esc(s.openrouter_model)}" placeholder="deepseek/deepseek-v4.1-flash"></div>
         <button class="btn btn--primary" type="submit">Kaydet</button>
         <p id="openrouter-message" class="muted"></p>
       </div>
@@ -653,6 +661,13 @@ function wireGlobalHandlers() {
     if (e.target.id === "openrouter-form") {
       e.preventDefault();
       return handleOpenRouterSubmit(e.target);
+    }
+    if (e.target.id === "paragraph-key-form") {
+      e.preventDefault();
+      const key = (new FormData(e.target).get("openrouter_api_key") || "").trim();
+      if (!key) return;
+      await saveSettings({ openrouter_api_key: key });
+      return renderParagraphMode();
     }
   });
 

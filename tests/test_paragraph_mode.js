@@ -2,7 +2,8 @@ import "fake-indexeddb/auto";
 import assert from "node:assert";
 import { pickRandomWords, buildParagraphPrompt, boldTargetWords } from "../js/logic/paragraphPrompt.js";
 import { clear, put, STORE_NAMES } from "../js/data/db.js";
-import { eligibleParagraphWords } from "../js/data/paragraphMode.js";
+import { eligibleParagraphWords, generateParagraph, DEFAULT_MODEL } from "../js/data/paragraphMode.js";
+import { saveSettings } from "../js/data/settings.js";
 
 async function reset() {
   for (const s of STORE_NAMES) await clear(s);
@@ -62,6 +63,33 @@ await reset();
   const eligible = await eligibleParagraphWords();
   const ids = eligible.map((w) => w.id).sort();
   assert.deepStrictEqual(ids, ["w1", "w2"]);
+}
+
+// --- generateParagraph: empty model setting falls back to DEFAULT_MODEL ---
+{
+  await saveSettings({ openrouter_api_key: "sk-or-test", openrouter_model: "" });
+  globalThis.location = { origin: "http://test" };
+  let sent;
+  globalThis.fetch = async (_url, init) => {
+    sent = { auth: init.headers.Authorization, body: JSON.parse(init.body) };
+    return { ok: true, json: async () => ({ choices: [{ message: { content: " Ein **Test**. " } }] }) };
+  };
+
+  const { paragraph, words } = await generateParagraph(2);
+  assert.strictEqual(sent.body.model, DEFAULT_MODEL);
+  assert.strictEqual(DEFAULT_MODEL, "deepseek/deepseek-v4.1-flash");
+  assert.strictEqual(sent.auth, "Bearer sk-or-test");
+  assert.strictEqual(paragraph, "Ein **Test**.");
+  assert.strictEqual(words.length, 2);
+}
+
+// --- generateParagraph: missing key gives a clear error, no request sent ---
+{
+  await saveSettings({ openrouter_api_key: "" });
+  let called = false;
+  globalThis.fetch = async () => { called = true; };
+  await assert.rejects(() => generateParagraph(2), /API anahtarını gir/);
+  assert.strictEqual(called, false);
 }
 
 console.log("test_paragraph_mode.js: all assertions passed");
