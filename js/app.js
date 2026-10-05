@@ -7,6 +7,7 @@ import { today as todayStr } from "./data/clock.js";
 import { getItemContext, dashboardContext, beginNewSet } from "./studyFlow.js";
 import { exportBackup, importBackup } from "./data/backup.js";
 import { generateParagraph } from "./data/paragraphMode.js";
+import { boldTargetWords } from "./logic/paragraphPrompt.js";
 
 const root = document.getElementById("app");
 const navEl = document.getElementById("app-nav");
@@ -391,7 +392,7 @@ async function renderParagraphMode() {
 function paragraphResultHtml({ paragraph, words }) {
   return `
     <h2 class="section-title">Paragraf</h2>
-    <div class="card paragraph-text">${esc(paragraph).replace(/\n+/g, "<br><br>")}</div>
+    <div class="card paragraph-text">${boldTargetWords(esc(paragraph)).replace(/\n+/g, "<br><br>")}</div>
     <h2 class="section-title">Kullanılması istenen kelimeler (${words.length})</h2>
     <div class="card"><ul class="mastered-list">${words.map((w) => `<li>${esc(w.anzeige)} <span class="muted">— ${esc(w.tr)}</span></li>`).join("")}</ul></div>
   `;

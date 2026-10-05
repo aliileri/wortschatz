@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import assert from "node:assert";
-import { pickRandomWords, buildParagraphPrompt } from "../js/logic/paragraphPrompt.js";
+import { pickRandomWords, buildParagraphPrompt, boldTargetWords } from "../js/logic/paragraphPrompt.js";
 import { clear, put, STORE_NAMES } from "../js/data/db.js";
 import { eligibleParagraphWords } from "../js/data/paragraphMode.js";
 
@@ -30,6 +30,17 @@ async function reset() {
   assert.ok(prompt.includes("verfügen"));
   assert.ok(prompt.includes("2"));
   assert.ok(/B2/.test(prompt));
+  assert.ok(prompt.includes("**kelime**"));
+}
+
+// --- boldTargetWords: markers become <strong>, escaped HTML stays inert ---
+{
+  const escaped = "Er hat die **Bewerbung** &lt;script&gt; **abgeschickt**.";
+  assert.strictEqual(
+    boldTargetWords(escaped),
+    "Er hat die <strong>Bewerbung</strong> &lt;script&gt; <strong>abgeschickt</strong>."
+  );
+  assert.strictEqual(boldTargetWords("ohne Markierung"), "ohne Markierung");
 }
 
 // --- eligibleParagraphWords: only words with a review card (box >= 1) ---

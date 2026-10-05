@@ -15,6 +15,13 @@ export function buildParagraphPrompt(words, wordCount) {
   return [
     "Sen bir Almanca öğretmenisin. B2 seviyesinde, akıcı ve doğal bir Almanca paragraf yaz.",
     `Paragraf şu ${wordCount} Almanca kelimenin/ifadenin hepsini doğal bir şekilde, uygun çekimlerle içermeli: ${list}.`,
+    "Bu kelimelerin her birini metinde geçtiği yerde, çekimli haliyle birlikte **kelime** şeklinde çift yıldızla işaretle. Bunun dışında hiçbir şeyi işaretleme, başka biçimlendirme kullanma.",
     "Sadece paragrafın kendisini yaz - başlık, çeviri veya ek açıklama ekleme.",
   ].join("\n");
+}
+
+/** Turns the model's **word** markers into <strong> tags. Expects text that
+ * is already HTML-escaped, so only these tags end up as real markup. */
+export function boldTargetWords(escapedText) {
+  return escapedText.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
 }
