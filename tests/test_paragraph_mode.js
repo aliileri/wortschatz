@@ -3,7 +3,7 @@ import assert from "node:assert";
 import { pickRandomWords, buildParagraphPrompt, boldTargetWords } from "../js/logic/paragraphPrompt.js";
 import { clear, put, STORE_NAMES } from "../js/data/db.js";
 import { eligibleParagraphWords, generateParagraph, DEFAULT_MODEL } from "../js/data/paragraphMode.js";
-import { saveSettings } from "../js/data/settings.js";
+import { saveSettings, loadSettings } from "../js/data/settings.js";
 
 async function reset() {
   for (const s of STORE_NAMES) await clear(s);
@@ -90,6 +90,14 @@ await reset();
   globalThis.fetch = async () => { called = true; };
   await assert.rejects(() => generateParagraph(2), /API anahtarını gir/);
   assert.strictEqual(called, false);
+}
+
+// --- generateParagraph: a 401 forgets the stored key so it can be re-entered ---
+{
+  await saveSettings({ openrouter_api_key: "sk-or-wrong" });
+  globalThis.fetch = async () => ({ ok: false, status: 401, text: async () => "" });
+  await assert.rejects(() => generateParagraph(2), (err) => err.invalidKey === true);
+  assert.strictEqual((await loadSettings()).openrouter_api_key, "");
 }
 
 console.log("test_paragraph_mode.js: all assertions passed");

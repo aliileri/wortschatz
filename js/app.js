@@ -381,9 +381,10 @@ async function renderParagraphMode() {
     <form id="paragraph-key-form" class="card">
       <div class="field">
         <label for="paragraph-api-key">OpenRouter API anahtarı (bir kez gir, telefonda saklanır)</label>
-        <input type="password" id="paragraph-api-key" name="openrouter_api_key" autocomplete="off" placeholder="sk-or-...">
+        <input type="text" id="paragraph-api-key" name="openrouter_api_key" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="sk-or-...">
       </div>
       <button class="btn btn--primary" type="submit" style="margin-top:12px;">Kaydet</button>
+      <p id="paragraph-key-message" class="muted"></p>
     </form>`}
     <div class="card">
       <div class="field">
@@ -420,7 +421,8 @@ async function handleGenerateParagraph() {
     msg.textContent = "";
     resultEl.innerHTML = paragraphResultHtml(result);
   } catch (err) {
-    msg.textContent = err.message || "Paragraf oluşturulamadı.";
+    if (err.invalidKey) await renderParagraphMode();
+    document.getElementById("paragraph-message").textContent = err.message || "Paragraf oluşturulamadı.";
   }
 }
 
@@ -664,8 +666,12 @@ function wireGlobalHandlers() {
     }
     if (e.target.id === "paragraph-key-form") {
       e.preventDefault();
-      const key = (new FormData(e.target).get("openrouter_api_key") || "").trim();
-      if (!key) return;
+      const key = (new FormData(e.target).get("openrouter_api_key") || "").replace(/\s+/g, "");
+      if (!key.startsWith("sk-or-")) {
+        document.getElementById("paragraph-key-message").textContent =
+          "Bu bir OpenRouter anahtarına benzemiyor; anahtar \"sk-or-\" ile başlar.";
+        return;
+      }
       await saveSettings({ openrouter_api_key: key });
       return renderParagraphMode();
     }

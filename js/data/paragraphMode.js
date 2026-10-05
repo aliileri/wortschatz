@@ -3,7 +3,7 @@
 // Settings) to turn them into a B2 German practice paragraph. Like the rest
 // of the app, the API key never leaves the device except to OpenRouter itself.
 import { getAll } from "./db.js";
-import { loadSettings } from "./settings.js";
+import { loadSettings, saveSettings } from "./settings.js";
 import { pickRandomWords, buildParagraphPrompt } from "../logic/paragraphPrompt.js";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
@@ -32,6 +32,13 @@ async function callOpenRouter(prompt, apiKey, model) {
     },
     body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }] }),
   });
+  if (res.status === 401) {
+    // Rejected key: forget it so the paragraph screen asks for it again.
+    await saveSettings({ openrouter_api_key: "" });
+    const err = new Error("OpenRouter anahtarı kabul etmedi. Anahtarı yukarıdaki kutuya yeniden yapıştır.");
+    err.invalidKey = true;
+    throw err;
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`OpenRouter isteği başarısız (${res.status}): ${text.slice(0, 200)}`);
