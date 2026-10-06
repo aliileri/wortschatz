@@ -15,7 +15,7 @@ import { today as todayFn, nowIso } from "./clock.js";
 import { applyAnswer as leitnerApplyAnswer } from "../logic/leitner.js";
 import { shouldUnlockTrDe, isMastered } from "../logic/direction.js";
 import { resolveTriageChoice } from "../logic/triage.js";
-import { isBlackBox } from "../logic/blackBox.js";
+import { isHardWord } from "../logic/hardWords.js";
 import { isWorkday, isFirstWorkdayOfMonth, addWorkdays } from "../logic/workdays.js";
 import { seededSample } from "../logic/seededRandom.js";
 
@@ -254,25 +254,92 @@ export async function submitReviewAnswer(card, correct, questionType, todayStr =
   };
   await put("reviewLogs", log);
 
-  const cardLogs = await getAllByIndex("reviewLogs", "cardId", card.cardId);
-  const relevant = cardLogs.filter((l) => REVIEW_QUESTION_TYPES.includes(l.question_type));
-  const shownCount = relevant.length;
-  const correctCount = relevant.filter((l) => l.result === "correct").length;
-  if (!card.is_black_box && isBlackBox(shownCount, correctCount)) {
-    card.is_black_box = true;
+  const wordLogs = await getAllByIndex("reviewLogs", "wordId", card.wordId);
+  const wrongs = wrongCountsByWord(wordLogs).get(card.wordId) || 0;
+  const uwNow = await get("userWords", card.wordId);
+  if (!card.is_hard && isHardWord(wrongs - releasedAt(uwNow))) {
+    await markWordHard(card.wordId);
+    card.is_hard = true;
     card.is_active = false;
-    await put("reviewCards", card);
   }
 
   return log;
 }
 
-/** Cards set aside because they were shown BLACK_BOX_THRESHOLD+ times and
- * never answered correctly once - no longer in the active review queue,
- * awaiting a future dedicated review mode. */
-export async function blackBoxCards() {
+// Wrong answers already counted when the word was last taken back out of
+// "Zor kelimeler" - only wrongs after that count towards the next move.
+function releasedAt(userWord) {
+  return (userWord && userWord.hard_released_wrongs) || 0;
+}
+
+/** wordId -> number of wrong review answers (both directions). */
+export function wrongCountsByWord(logs) {
+  const counts = new Map();
+  for (const l of logs) {
+    if (l.result === "wrong" && REVIEW_QUESTION_TYPES.includes(l.question_type)) {
+      counts.set(l.wordId, (counts.get(l.wordId) || 0) + 1);
+    }
+  }
+  return counts;
+}
+
+/** Moves a word into "Zor kelimeler": every card of it leaves the review
+ * queue and the word is never asked again (paragraph mode still uses it). */
+export async function markWordHard(wordId) {
+  const cards = await getAllByIndex("reviewCards", "wordId", wordId);
+  for (const c of cards) {
+    c.is_hard = true;
+    c.is_active = false;
+    await put("reviewCards", c);
+  }
+  const uw = await get("userWords", wordId);
+  if (uw && uw.status !== "hard") {
+    uw.status = "hard";
+    await put("userWords", uw);
+  }
+}
+
+/** Takes a word back out of "Zor kelimeler": its cards rejoin the queue,
+ * due today, in the boxes they were in. */
+export async function releaseHardWord(wordId, newStatus = "learning", todayStr = todayFn()) {
+  const cards = await getAllByIndex("reviewCards", "wordId", wordId);
+  for (const c of cards) {
+    c.is_hard = false;
+    c.is_black_box = false;
+    c.is_active = true;
+    c.due_on = todayStr;
+    await put("reviewCards", c);
+  }
+  const uw = await get("userWords", wordId);
+  if (uw) {
+    const logs = await getAllByIndex("reviewLogs", "wordId", wordId);
+    uw.status = newStatus;
+    uw.hard_released_wrongs = wrongCountsByWord(logs).get(wordId) || 0;
+    await put("userWords", uw);
+  }
+}
+
+/** Catches words that crossed the threshold before this rule existed (or
+ * old "kara kutu" cards). Cheap enough to run on every dashboard load. */
+export async function sweepHardWords() {
+  const counts = wrongCountsByWord(await getAll("reviewLogs"));
+  const userWords = new Map((await getAll("userWords")).map((u) => [u.wordId, u]));
+  const cards = await getAll("reviewCards");
+  const alreadyHard = new Set(cards.filter((c) => c.is_hard).map((c) => c.wordId));
+  const moved = [];
+  for (const [wordId, wrongs] of counts) {
+    const uw = userWords.get(wordId);
+    if (!isHardWord(wrongs - releasedAt(uw)) || alreadyHard.has(wordId)) continue;
+    if (uw && uw.status === "hard") continue;
+    await markWordHard(wordId);
+    moved.push(wordId);
+  }
+  return moved;
+}
+
+export async function hardWordCards() {
   const all = await getAll("reviewCards");
-  return all.filter((c) => c.is_black_box);
+  return all.filter((c) => c.is_hard);
 }
 
 export async function applyTriage(userWord, choice, todayStr = todayFn(), setId = null) {

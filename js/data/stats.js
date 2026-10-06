@@ -2,9 +2,10 @@
 import { getAll, getAllByIndex } from "./db.js";
 import { today as todayFn } from "./clock.js";
 import { getKnownCleared } from "./sets.js";
+import { wrongCountsByWord } from "./planner.js";
 
 const REVIEW_QUESTION_TYPES = ["meaning", "production", "cloze"];
-const STATUS_VALUES = ["new", "known", "learning", "mastered"];
+const STATUS_VALUES = ["new", "known", "learning", "mastered", "hard"];
 
 function addDaysStr(dateStr, n) {
   const [y, m, d] = dateStr.split("-").map(Number);
@@ -81,15 +82,16 @@ export async function masteredWords() {
     .sort((a, b) => (a.thema || "").localeCompare(b.thema || "") || (a.source_id || 0) - (b.source_id || 0));
 }
 
-export async function blackBoxWords() {
-  const cards = (await getAll("reviewCards")).filter((c) => c.is_black_box);
-  if (!cards.length) return [];
+/** Words in "Zor kelimeler", most wrong answers first. */
+export async function hardWords() {
+  const hardIds = new Set((await getAll("reviewCards")).filter((c) => c.is_hard).map((c) => c.wordId));
+  if (!hardIds.size) return [];
+  const wrongs = wrongCountsByWord(await getAll("reviewLogs"));
   const words = await getAll("words");
-  const wordsById = new Map(words.map((w) => [w.id, w]));
-  return cards
-    .map((c) => ({ word: wordsById.get(c.wordId), direction: c.direction }))
-    .filter((r) => r.word)
-    .sort((a, b) => (a.word.thema || "").localeCompare(b.word.thema || "") || (a.word.source_id || 0) - (b.word.source_id || 0));
+  return words
+    .filter((w) => hardIds.has(w.id))
+    .map((w) => ({ word: w, wrongs: wrongs.get(w.id) || 0 }))
+    .sort((a, b) => b.wrongs - a.wrongs);
 }
 
 export async function reviewForecast(days = 14, todayStr = todayFn()) {

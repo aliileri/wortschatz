@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import assert from "node:assert";
-import { pickRandomWords, buildParagraphPrompt, boldTargetWords } from "../js/logic/paragraphPrompt.js";
-import { clear, put, STORE_NAMES } from "../js/data/db.js";
+import { pickRandomWords, pickParagraphWords, buildParagraphPrompt, boldTargetWords } from "../js/logic/paragraphPrompt.js";
+import { clear, get, put, STORE_NAMES } from "../js/data/db.js";
 import { eligibleParagraphWords, generateParagraph, DEFAULT_MODEL } from "../js/data/paragraphMode.js";
 import { saveSettings, loadSettings } from "../js/data/settings.js";
 
@@ -18,6 +18,27 @@ async function reset() {
 
   const smallPool = pool.slice(0, 3);
   assert.strictEqual(pickRandomWords(smallPool, 10).length, 3);
+}
+
+// --- pickParagraphWords: most-missed first, then rotate through the rest ---
+{
+  const words = ["a", "b", "c", "d"].map((id) => ({ id }));
+  const wrongs = new Map([["a", 1], ["b", 7], ["c", 3]]); // d: never wrong
+  const box = new Map([["a", 2], ["b", 1], ["c", 1], ["d", 4]]);
+  const uses = new Map();
+  const ids = () => pickParagraphWords(words, 2, { wrongs, box, uses }).map((w) => w.id);
+
+  assert.deepStrictEqual(ids(), ["b", "c"]);
+  uses.set("b", 1); uses.set("c", 1);
+  assert.deepStrictEqual(ids(), ["a", "d"]); // easier words get their turn
+  uses.set("a", 1); uses.set("d", 1);
+  assert.deepStrictEqual(ids(), ["b", "c"]); // full round done - hardest again
+
+  // Same number of wrongs: the lower box wins.
+  const tie = pickParagraphWords([{ id: "x" }, { id: "y" }], 1, {
+    wrongs: new Map([["x", 2], ["y", 2]]), box: new Map([["x", 5], ["y", 1]]), uses: new Map(),
+  });
+  assert.strictEqual(tie[0].id, "y");
 }
 
 // --- buildParagraphPrompt: mentions every word and the requested count ---
@@ -81,6 +102,8 @@ await reset();
   assert.strictEqual(sent.auth, "Bearer sk-or-test");
   assert.strictEqual(paragraph, "Ein **Test**.");
   assert.strictEqual(words.length, 2);
+  // Each word used in a delivered paragraph is counted for the rotation.
+  assert.deepStrictEqual((await get("meta", "paragraphUses")).counts, { w1: 1, w2: 1 });
 }
 
 // --- generateParagraph: missing key gives a clear error, no request sent ---
@@ -98,6 +121,8 @@ await reset();
   globalThis.fetch = async () => ({ ok: false, status: 401, text: async () => "" });
   await assert.rejects(() => generateParagraph(2), (err) => err.invalidKey === true);
   assert.strictEqual((await loadSettings()).openrouter_api_key, "");
+  // A failed request doesn't count as a use.
+  assert.deepStrictEqual((await get("meta", "paragraphUses")).counts, { w1: 1, w2: 1 });
 }
 
 console.log("test_paragraph_mode.js: all assertions passed");

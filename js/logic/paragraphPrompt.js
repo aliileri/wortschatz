@@ -10,6 +10,19 @@ export function pickRandomWords(words, count) {
   return arr.slice(0, count);
 }
 
+/** Hardest first, but rotating so every word gets its turn: words used in
+ * fewer paragraphs come first; among those, most wrong answers first, then
+ * lowest box. Remaining ties are broken randomly. `stats` holds Maps keyed
+ * by word id: wrongs, box, uses. */
+export function pickParagraphWords(words, count, { wrongs, box, uses }) {
+  const ordered = pickRandomWords(words, words.length);
+  ordered.sort((a, b) =>
+    (uses.get(a.id) || 0) - (uses.get(b.id) || 0) ||
+    (wrongs.get(b.id) || 0) - (wrongs.get(a.id) || 0) ||
+    (box.get(a.id) ?? 99) - (box.get(b.id) ?? 99));
+  return ordered.slice(0, count);
+}
+
 export function buildParagraphPrompt(words, wordCount) {
   const list = words.map((w) => w.anzeige || w.wort).join(", ");
   return [

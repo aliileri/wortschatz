@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import assert from "node:assert";
-import { clear, put, STORE_NAMES } from "../js/data/db.js";
+import { clear, get, put, STORE_NAMES } from "../js/data/db.js";
 import { saveSettings } from "../js/data/settings.js";
 import * as planner from "../js/data/planner.js";
 import { addWorkdays } from "../js/logic/workdays.js";
@@ -345,40 +345,57 @@ await reset();
   assert.strictEqual(batchInSet2.length, 1); // fresh quota in a new set
 }
 
-// --- a card wrong 10 times straight becomes a black box and drops out of the queue ---
+// --- 10 wrong answers (even with some right ones) move a word to "Zor kelimeler" ---
 await reset();
 {
   const w = await makeWord();
-  let card = await makeReviewCard(w, { box: 1, due_on: MONDAY });
+  await makeUserWord(w, { status: "learning" });
+  const card = await makeReviewCard(w, { box: 1, due_on: MONDAY });
+  const trDe = await makeReviewCard(w, { direction: "tr_de", box: 2, due_on: MONDAY });
 
-  for (let i = 0; i < 9; i++) {
-    await planner.submitReviewAnswer(card, false, "meaning", MONDAY, SET);
-  }
-  assert.strictEqual(card.is_black_box, undefined);
-  assert.strictEqual((await planner.dueReviewsQueryset(MONDAY)).length, 1);
+  for (let i = 0; i < 5; i++) await planner.submitReviewAnswer(card, true, "meaning", MONDAY, SET);
+  for (let i = 0; i < 6; i++) await planner.submitReviewAnswer(card, false, "meaning", MONDAY, SET);
+  for (let i = 0; i < 3; i++) await planner.submitReviewAnswer(trDe, false, "production", MONDAY, SET);
+  assert.strictEqual(card.is_hard, undefined); // 9 wrongs across both directions
+  assert.strictEqual((await planner.dueReviewsQueryset(MONDAY)).length, 2);
 
-  await planner.submitReviewAnswer(card, false, "meaning", MONDAY, SET);
-  assert.strictEqual(card.is_black_box, true);
+  await planner.submitReviewAnswer(card, false, "meaning", MONDAY, SET); // 10th wrong
+  assert.strictEqual(card.is_hard, true);
   assert.strictEqual(card.is_active, false);
+  // Both directions leave the queue and the word is flagged hard.
   assert.strictEqual((await planner.dueReviewsQueryset(MONDAY)).length, 0);
-
-  const blackBox = await planner.blackBoxCards();
-  assert.strictEqual(blackBox.length, 1);
-  assert.strictEqual(blackBox[0].cardId, card.cardId);
+  assert.strictEqual((await planner.hardWordCards()).length, 2);
+  assert.strictEqual((await get("userWords", w.id)).status, "hard");
 }
 
-// --- a single correct answer within the streak resets the black-box count ---
+// --- sweep moves words that already had 10+ wrongs; release brings them back ---
 await reset();
 {
   const w = await makeWord();
-  const card = await makeReviewCard(w, { box: 1, due_on: MONDAY });
-
-  for (let i = 0; i < 9; i++) {
-    await planner.submitReviewAnswer(card, false, "meaning", MONDAY, SET);
+  await makeUserWord(w, { status: "learning" });
+  const card = await makeReviewCard(w, { box: 3, due_on: MONDAY });
+  for (let i = 0; i < 12; i++) {
+    await put("reviewLogs", { cardId: card.cardId, wordId: w.id, result: "wrong", question_type: "meaning", dateKey: MONDAY });
   }
-  await planner.submitReviewAnswer(card, true, "meaning", MONDAY, SET); // 10th attempt, correct
-  assert.strictEqual(card.is_black_box, undefined);
-  assert.strictEqual(card.is_active, true);
+
+  assert.deepStrictEqual(await planner.sweepHardWords(), [w.id]);
+  assert.strictEqual((await planner.dueReviewsQueryset(MONDAY)).length, 0);
+  assert.deepStrictEqual(await planner.sweepHardWords(), []); // idempotent
+
+  await planner.releaseHardWord(w.id, "learning", MONDAY);
+  const released = await get("reviewCards", card.cardId);
+  assert.strictEqual(released.is_active, true);
+  assert.strictEqual(released.is_hard, false);
+  assert.strictEqual(released.box, 3);
+  assert.strictEqual((await get("userWords", w.id)).status, "learning");
+
+  // The old wrongs no longer count: the sweep leaves a released word alone...
+  assert.deepStrictEqual(await planner.sweepHardWords(), []);
+  // ...until it collects 10 new wrongs.
+  for (let i = 0; i < 9; i++) await planner.submitReviewAnswer(released, false, "meaning", MONDAY, SET);
+  assert.strictEqual(released.is_hard, false);
+  await planner.submitReviewAnswer(released, false, "meaning", MONDAY, SET);
+  assert.strictEqual(released.is_hard, true);
 }
 
 console.log("test_planner.js: all assertions passed");

@@ -1,7 +1,7 @@
 // Full offline app shell. This app has no server to fall back to, so after
 // the first successful load everything - including the 1057-word dataset -
 // must be servable straight from the cache, airplane mode included.
-const CACHE_NAME = "wortschatz-shell-v20";
+const CACHE_NAME = "wortschatz-shell-v21";
 
 const SHELL_ASSETS = [
   "./",
@@ -26,7 +26,7 @@ const SHELL_ASSETS = [
   "./js/logic/leitner.js",
   "./js/logic/direction.js",
   "./js/logic/triage.js",
-  "./js/logic/blackBox.js",
+  "./js/logic/hardWords.js",
   "./js/logic/questionTypes.js",
   "./js/logic/paragraphPrompt.js",
   "./js/logic/seededRandom.js",

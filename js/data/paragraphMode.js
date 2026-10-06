@@ -2,16 +2,18 @@
 // IndexedDB, then calls OpenRouter (the user's own account/key, entered in
 // Settings) to turn them into a B2 German practice paragraph. Like the rest
 // of the app, the API key never leaves the device except to OpenRouter itself.
-import { getAll } from "./db.js";
+import { get, put, getAll } from "./db.js";
 import { loadSettings, saveSettings } from "./settings.js";
-import { pickRandomWords, buildParagraphPrompt } from "../logic/paragraphPrompt.js";
+import { wrongCountsByWord } from "./planner.js";
+import { pickParagraphWords, buildParagraphPrompt } from "../logic/paragraphPrompt.js";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 // Used whenever no model is set in Settings, so only the key ever has to be entered.
 export const DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash";
 
 /** Words that have entered the box system in either direction ("kutu 1'den
- * itibaren") - excludes untriaged "new" and never-boxed "known" words. */
+ * itibaren"), including those set aside in "Zor kelimeler" - excludes
+ * untriaged "new" and never-boxed "known" words. */
 export async function eligibleParagraphWords() {
   const cards = await getAll("reviewCards");
   const wordIds = [...new Set(cards.map((c) => c.wordId))];
@@ -60,8 +62,31 @@ export async function generateParagraph(wordCount) {
     throw new Error(`Havuzda yeterli kelime yok (${pool.length}/${wordCount}). Önce birkaç kelime öğrenmeye başla.`);
   }
 
-  const words = pickRandomWords(pool, wordCount);
+  const uses = await loadParagraphUses();
+  const words = pickParagraphWords(pool, wordCount, {
+    wrongs: wrongCountsByWord(await getAll("reviewLogs")),
+    box: lowestBoxByWord(await getAll("reviewCards")),
+    uses,
+  });
   const prompt = buildParagraphPrompt(words, wordCount);
   const paragraph = await callOpenRouter(prompt, settings.openrouter_api_key, model);
+
+  // Only a paragraph that actually came back counts as a use.
+  for (const w of words) uses.set(w.id, (uses.get(w.id) || 0) + 1);
+  await put("meta", { key: USES_KEY, counts: Object.fromEntries(uses) });
   return { paragraph, words };
+}
+
+// How many paragraphs each word has appeared in - drives the rotation.
+const USES_KEY = "paragraphUses";
+
+async function loadParagraphUses() {
+  const rec = await get("meta", USES_KEY);
+  return new Map(Object.entries((rec && rec.counts) || {}));
+}
+
+function lowestBoxByWord(cards) {
+  const box = new Map();
+  for (const c of cards) box.set(c.wordId, Math.min(box.get(c.wordId) ?? 99, c.box));
+  return box;
 }

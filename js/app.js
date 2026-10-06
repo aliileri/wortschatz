@@ -19,7 +19,7 @@ const WORTART_VALUES = [
   "Nomen", "Verb", "Adjektiv", "Adverb", "Partikel", "Präposition",
   "Konnektor", "Wendung", "Redemittel", "Redewendung",
 ];
-const STATUS_LABELS = { new: "Yeni", known: "Biliniyor", learning: "Öğreniliyor", mastered: "Öğrenildi" };
+const STATUS_LABELS = { new: "Yeni", known: "Biliniyor", learning: "Öğreniliyor", mastered: "Öğrenildi", hard: "Zor" };
 
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -140,11 +140,11 @@ async function renderDashboard() {
     ? `<ul class="mastered-list">${ctx.masteredWords.map((w) => `<li>${esc(w.anzeige)} <span class="muted">— ${esc(w.tr)}</span></li>`).join("")}</ul>`
     : `<p class="muted">Henüz yok. Bir kelime her iki yönde de kutu 6'yı geçince buraya gelir.</p>`;
 
-  const blackBoxSection = ctx.blackBoxWords.length
-    ? `<h2 class="section-title">Kara kutu (${ctx.blackBoxWords.length})</h2>
+  const hardWordsSection = ctx.hardWords.length
+    ? `<h2 class="section-title">Zor kelimeler (${ctx.hardWords.length})</h2>
     <div class="card">
-      <p class="muted">10+ kez sorulup hiç bilinmeyen kartlar. Artık tekrar kuyruğunda görünmüyorlar.</p>
-      <ul class="mastered-list">${ctx.blackBoxWords.map((r) => `<li>${esc(r.word.anzeige)} <span class="muted">— ${esc(r.word.tr)} · ${directionLabel(r.direction)}</span></li>`).join("")}</ul>
+      <p class="muted">10 kez yanlış yaptığın kelimeler. Artık sorulmuyorlar; paragraf modu önce bunları kullanır. Geri almak için Kelimeler listesinden durumunu değiştir.</p>
+      <ul class="mastered-list">${ctx.hardWords.map((r) => `<li>${esc(r.word.anzeige)} <span class="muted">— ${esc(r.word.tr)} · ${r.wrongs} yanlış</span></li>`).join("")}</ul>
     </div>`
     : "";
 
@@ -164,7 +164,7 @@ async function renderDashboard() {
     <h2 class="section-title">Tam öğrenilen kelimeler (${ctx.masteredWords.length})</h2>
     <div class="card">${masteredList}</div>
 
-    ${blackBoxSection}
+    ${hardWordsSection}
   `;
 }
 
@@ -366,6 +366,10 @@ async function handleStatusOverride(select) {
   const newStatus = select.value;
   const uw = await get("userWords", wordId);
   if (!uw) return;
+  // "Zor" is more than a label: it takes the word's cards out of (or back
+  // into) the review queue.
+  if (newStatus === "hard") return planner.markWordHard(wordId);
+  if (uw.status === "hard") return planner.releaseHardWord(wordId, newStatus, todayStr());
   uw.status = newStatus;
   await put("userWords", uw);
 }
@@ -376,7 +380,7 @@ async function renderParagraphMode() {
   const s = await loadSettings();
   root.innerHTML = `
     <h1 class="section-title">Paragraf Modu</h1>
-    <p class="muted">Öğrenmeye başladığın kelimelerden rastgele seçilenleri içeren, B2 seviyesinde bir Almanca paragraf üretir.</p>
+    <p class="muted">Kutudaki kelimelerinle B2 seviyesinde bir Almanca paragraf üretir. En çok yanlış yaptıklarından başlar, her paragrafta sıradaki kelimelere geçer; böylece bütün kelimeler sırayla kullanılır.</p>
     ${s.openrouter_api_key ? "" : `
     <form id="paragraph-key-form" class="card">
       <div class="field">

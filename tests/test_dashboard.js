@@ -61,4 +61,20 @@ await reset();
   assert.strictEqual(ctx.hasAnythingToDo, false);
 }
 
+// a word with 10+ wrongs from before the rule existed is moved on load and
+// listed under "Zor kelimeler" with its wrong count
+await reset();
+{
+  const w = await makeWord("hard1");
+  await put("reviewCards", { cardId: "hard1::de_tr", wordId: "hard1", direction: "de_tr", box: 1, due_on: MONDAY, streak: 0, lapses: 0, is_active: true, is_graduated: false });
+  for (let i = 0; i < 11; i++) {
+    await put("reviewLogs", { cardId: "hard1::de_tr", wordId: "hard1", result: "wrong", question_type: "meaning", dateKey: MONDAY });
+  }
+  const ctx = await dashboardContext(MONDAY);
+  assert.strictEqual(ctx.pendingReviews, 0);
+  assert.strictEqual(ctx.hardWords.length, 1);
+  assert.strictEqual(ctx.hardWords[0].word.id, w.id);
+  assert.strictEqual(ctx.hardWords[0].wrongs, 11);
+}
+
 console.log("test_dashboard.js: all assertions passed");

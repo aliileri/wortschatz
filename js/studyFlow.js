@@ -94,6 +94,9 @@ export async function beginNewSet() {
 }
 
 export async function dashboardContext(todayStr) {
+  // Before building the queue, so words that already crossed the hard-word
+  // threshold never show up in it.
+  await planner.sweepHardWords();
   let setId = await getCurrentSetId();
   let queue = await planner.buildDailyQueue(todayStr, setId);
   await planner.maybeCompleteDailyPlan(todayStr, queue);
@@ -114,14 +117,14 @@ export async function dashboardContext(todayStr) {
 
   const boxDist = await stats.boxDistribution();
   const mastered = await stats.masteredWords();
-  const blackBox = await stats.blackBoxWords();
+  const hard = await stats.hardWords();
 
   return {
     pendingReviews: queue.dueReviews.length,
     boxDist,
     boxTotal: Object.values(boxDist).reduce((a, b) => a + b, 0),
     masteredWords: mastered,
-    blackBoxWords: blackBox,
+    hardWords: hard,
     backlogBlocked: queue.backlogBlocked,
     backlogCount: queue.backlogCount,
     hasAnythingToDo: queueHasAnything(queue),
